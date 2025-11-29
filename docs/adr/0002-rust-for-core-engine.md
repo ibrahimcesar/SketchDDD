@@ -20,6 +20,7 @@ We evaluated several languages:
 
 ## Decision
 We will use **Rust** for the core engine, including:
+
 - `sketchddd-core`: Core data structures and semantics
 - `sketchddd-parser`: DSL parser using pest
 - `sketchddd-codegen`: Code generation

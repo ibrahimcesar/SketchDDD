@@ -1,0 +1,25 @@
+[package]
+name = "sketchddd-cli"
+description = "Command-line interface for SketchDDD"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sketchddd"
+path = "src/main.rs"
+
+[dependencies]
+sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
+sketchddd-codegen = { version = "0.1.0", path = "../sketchddd-codegen" }
+sketchddd-viz = { version = "0.1.0", path = "../sketchddd-viz" }
+clap = { workspace = true }
+colored = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

@@ -1,0 +1,127 @@
+// SketchDDD Grammar
+// A domain-specific language for domain-driven design
+
+// Top-level file structure
+file = { SOI ~ context_decl* ~ map_decl* ~ EOI }
+
+// Context declaration
+context_decl = {
+    "context" ~ identifier ~ "{" ~
+        context_body ~
+    "}"
+}
+
+context_body = {
+    (objects_block | morphisms_block | aggregate_block | value_block | enum_block)*
+}
+
+// Objects block
+objects_block = {
+    "objects" ~ "{" ~ identifier_list ~ "}"
+}
+
+// Morphisms block
+morphisms_block = {
+    "morphisms" ~ "{" ~ morphism_decl* ~ "}"
+}
+
+morphism_decl = {
+    identifier ~ ":" ~ type_expr ~ "->" ~ type_expr
+}
+
+// Aggregate block
+aggregate_block = {
+    "aggregate" ~ identifier ~ "{" ~
+        aggregate_body ~
+    "}"
+}
+
+aggregate_body = {
+    ("root" ~ ":" ~ identifier)? ~
+    ("contains" ~ ":" ~ "[" ~ identifier_list ~ "]")? ~
+    ("invariant" ~ ":" ~ expression)*
+}
+
+// Value object block
+value_block = {
+    "value" ~ identifier ~ "{" ~
+        field_decl* ~
+    "}"
+}
+
+// Enum block
+enum_block = {
+    "enum" ~ identifier ~ "=" ~ variant_list
+}
+
+// Field declaration
+field_decl = {
+    identifier ~ ":" ~ type_expr
+}
+
+// Type expressions
+type_expr = {
+    generic_type | identifier
+}
+
+generic_type = {
+    identifier ~ "<" ~ type_expr ~ ">"
+}
+
+// Variant list for enums
+variant_list = {
+    identifier ~ ("|" ~ identifier)*
+}
+
+// Context map declaration
+map_decl = {
+    "map" ~ identifier ~ ":" ~ identifier ~ "->" ~ identifier ~ "{" ~
+        map_body ~
+    "}"
+}
+
+map_body = {
+    ("pattern" ~ ":" ~ map_pattern)? ~
+    ("mappings" ~ "{" ~ mapping_decl* ~ "}")?
+}
+
+map_pattern = {
+    "Partnership" |
+    "CustomerSupplier" |
+    "Conformist" |
+    "AntiCorruptionLayer" |
+    "SeparateWays" |
+    "PublishedLanguage" |
+    "OpenHostService" |
+    "SharedKernel"
+}
+
+mapping_decl = {
+    identifier ~ "->" ~ identifier
+}
+
+// Expression (for invariants and equations)
+expression = {
+    term ~ (operator ~ term)*
+}
+
+term = {
+    identifier | number | "(" ~ expression ~ ")"
+}
+
+operator = {
+    "=" | "+" | "-" | "*" | "/" | "." | "sum" | "map"
+}
+
+// Identifier list
+identifier_list = {
+    identifier ~ ("," ~ identifier)*
+}
+
+// Basic tokens
+identifier = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+number = @{ ASCII_DIGIT+ }
+
+// Whitespace and comments
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* | "/*" ~ (!"*/" ~ ANY)* ~ "*/" }

@@ -1,0 +1,18 @@
+[package]
+name = "sketchddd-core"
+description = "Core categorical semantics and data structures for SketchDDD"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["ddd", "domain-driven-design", "category-theory"]
+categories = ["data-structures"]
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
