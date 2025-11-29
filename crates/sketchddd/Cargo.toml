@@ -1,0 +1,17 @@
+[package]
+name = "sketchddd"
+description = "A Categorical Framework for Domain-Driven Design"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["ddd", "domain-driven-design", "category-theory", "modeling", "code-generation"]
+categories = ["development-tools", "visualization"]
+
+[dependencies]
+sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
+sketchddd-codegen = { version = "0.1.0", path = "../sketchddd-codegen" }
+sketchddd-viz = { version = "0.1.0", path = "../sketchddd-viz" }

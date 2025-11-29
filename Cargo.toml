@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/sketchddd",
     "crates/sketchddd-core",
     "crates/sketchddd-parser",
     "crates/sketchddd-codegen",
