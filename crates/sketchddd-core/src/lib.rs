@@ -28,7 +28,7 @@ pub mod mapping;
 pub mod sketch;
 pub mod validation;
 
-pub use context::BoundedContext;
+pub use context::{BoundedContext, Invariant};
 pub use mapping::ContextMap;
 pub use sketch::Sketch;
 pub use validation::{ValidationError, ValidationResult};

@@ -41,6 +41,9 @@ pub struct Morphism {
 
     /// Optional description
     pub description: Option<String>,
+
+    /// Whether this is an identity morphism (id_A : A -> A)
+    pub is_identity: bool,
 }
 
 /// A directed graph of objects and morphisms.
@@ -89,10 +92,45 @@ impl Graph {
             source,
             target,
             description: None,
+            is_identity: false,
         };
 
         self.morphisms.insert(id, morphism);
         id
+    }
+
+    /// Add an identity morphism for an object (id_A : A -> A).
+    ///
+    /// In category theory, every object has an identity morphism.
+    /// For entities in DDD, this represents the concept of identity.
+    pub fn add_identity_morphism(&mut self, object: ObjectId) -> MorphismId {
+        let id = MorphismId(self.next_morphism_id);
+        self.next_morphism_id += 1;
+
+        let name = if let Some(obj) = self.get_object(object) {
+            format!("id_{}", obj.name)
+        } else {
+            format!("id_{}", object.0)
+        };
+
+        let morphism = Morphism {
+            id,
+            name,
+            source: object,
+            target: object,
+            description: Some("Identity morphism".into()),
+            is_identity: true,
+        };
+
+        self.morphisms.insert(id, morphism);
+        id
+    }
+
+    /// Get the identity morphism for an object, if it exists.
+    pub fn get_identity_morphism(&self, object: ObjectId) -> Option<&Morphism> {
+        self.morphisms
+            .values()
+            .find(|m| m.is_identity && m.source == object && m.target == object)
     }
 
     /// Get an object by its ID.
