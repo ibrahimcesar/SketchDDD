@@ -33,7 +33,7 @@ pest = "2.7"
 pest_derive = "2.7"
 
 # Diagnostics
-ariadne = "0.4"
+ariadne = "0.6"
 strsim = "0.11"
 
 # CLI
