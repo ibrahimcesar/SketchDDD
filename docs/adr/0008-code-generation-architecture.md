@@ -4,7 +4,15 @@
 Accepted
 
 ## Context
-SketchDDD needs to generate idiomatic code from domain models for multiple target languages (Rust, TypeScript, Kotlin). Each language has different idioms, type systems, and best practices for representing DDD patterns.
+SketchDDD needs to generate idiomatic code from domain models for multiple target languages. Each language has different idioms, type systems, and best practices for representing DDD patterns.
+
+**Supported Languages:**
+- **Rust** - Systems programming, strong typing
+- **TypeScript** - Frontend/Node.js, structural typing
+- **Kotlin** - JVM/Android, null safety
+- **Python** - Data science, scripting, rapid prototyping
+- **Java** - Enterprise, Spring ecosystem
+- **Clojure** - Functional JVM, immutable data
 
 Key challenges:
 1. **Consistency**: Same model should generate semantically equivalent code across languages
@@ -32,12 +40,15 @@ SketchDDD Model → Common IR → Language-Specific AST → Rendered Code
 ┌─────────────────────────────────────────────────────────────────┐
 │                    sketchddd-codegen crate                      │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │   Model     │    │  Common IR  │    │  Language Backends  │ │
-│  │  (Input)    │ → │  (CodeUnit) │ → │  ├── rust.rs         │ │
-│  │             │    │             │    │  ├── typescript.rs  │ │
-│  │             │    │             │    │  └── kotlin.rs      │ │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
+│  │   Model     │    │  Common IR  │    │  Language Backends  │  │
+│  │  (Input)    │ →  │  (CodeUnit) │ →  │  ├── rust.rs        │  │
+│  │             │    │             │    │  ├── typescript.rs  │  │
+│  │             │    │             │    │  ├── kotlin.rs      │  │
+│  │             │    │             │    │  ├── python.rs      │  │
+│  │             │    │             │    │  ├── java.rs        │  │
+│  │             │    │             │    │  └── clojure.rs     │  │
+│  └─────────────┘    └─────────────┘    └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,16 +88,31 @@ pub enum StructKind {
 
 ### DDD Pattern Mappings
 
-| DDD Concept | Rust | TypeScript | Kotlin |
-|-------------|------|------------|--------|
-| Entity | `struct` with ID + `impl` | `interface` + `class` | `data class` with ID |
-| Value Object | `struct` with `Eq`, `Hash` | `readonly interface` | `data class` |
-| Aggregate | Module with root + members | Namespace/module | Package + classes |
-| Enum | `enum` | Union type / `enum` | `sealed class` |
-| Invariant | `impl` method with `Result` | Zod schema `.refine()` | `init { require() }` |
-| Morphism | Field + getter | Property | Property |
-| Optional | `Option<T>` | `T \| null` or `T?` | `T?` |
-| Collection | `Vec<T>` | `readonly T[]` | `List<T>` |
+#### Statically Typed Languages
+
+| DDD Concept | Rust | TypeScript | Kotlin | Java |
+|-------------|------|------------|--------|------|
+| Entity | `struct` + `impl` | `interface` + `class` | `data class` | `record` or `class` |
+| Value Object | `struct` with `Eq`, `Hash` | `readonly interface` | `data class` | `record` (Java 17+) |
+| Aggregate | Module with root | Namespace/module | Package + classes | Package + classes |
+| Enum | `enum` | Union type / `enum` | `sealed class` | `enum` or `sealed` |
+| Invariant | `Result` method | Zod `.refine()` | `init { require() }` | Bean Validation |
+| Morphism | Field + getter | Property | Property | Field + getter |
+| Optional | `Option<T>` | `T \| null` | `T?` | `Optional<T>` |
+| Collection | `Vec<T>` | `readonly T[]` | `List<T>` | `List<T>` |
+
+#### Dynamic/Functional Languages
+
+| DDD Concept | Python | Clojure |
+|-------------|--------|---------|
+| Entity | `@dataclass` + UUID | `defrecord` with `:id` |
+| Value Object | `@dataclass(frozen=True)` | `defrecord` (immutable) |
+| Aggregate | Module/package | Namespace |
+| Enum | `Enum` class | Keywords or `defenum` |
+| Invariant | Pydantic validator | `spec` or `:pre` |
+| Morphism | Property/attribute | Keyword access |
+| Optional | `Optional[T]` or `T \| None` | `nil` (nullable) |
+| Collection | `list[T]` | Vector `[]` |
 
 ### Output Structure
 
@@ -164,6 +190,61 @@ data class Order(
 }
 ```
 
+**Python:**
+```python
+from dataclasses import dataclass
+from pydantic import model_validator
+
+@dataclass
+class Order:
+    id: OrderId
+    items: list[LineItem]
+    total_price: Money
+
+    @model_validator(mode='after')
+    def validate_total(self) -> 'Order':
+        expected = sum(item.price for item in self.items)
+        if self.total_price != expected:
+            raise ValueError("total_price must equal sum of item prices")
+        return self
+```
+
+**Java:**
+```java
+public record Order(
+    OrderId id,
+    List<LineItem> items,
+    Money totalPrice
+) {
+    public Order {
+        Money expected = items.stream()
+            .map(LineItem::price)
+            .reduce(Money.ZERO, Money::add);
+        if (!totalPrice.equals(expected)) {
+            throw new IllegalArgumentException(
+                "totalPrice must equal sum of item prices");
+        }
+    }
+}
+```
+
+**Clojure:**
+```clojure
+(defrecord Order [id items total-price])
+
+(defn validate-order [{:keys [items total-price] :as order}]
+  (let [expected (reduce + (map :price items))]
+    (when (not= total-price expected)
+      (throw (ex-info "total-price must equal sum of item prices"
+                      {:expected expected :actual total-price})))
+    order))
+
+;; With spec
+(s/def ::order
+  (s/and (s/keys :req-un [::id ::items ::total-price])
+         #(= (:total-price %) (reduce + (map :price (:items %))))))
+```
+
 ### CLI Interface
 
 ```bash
@@ -202,6 +283,21 @@ export_style = "named"  # or "default"
 [codegen.kotlin]
 package = "com.example.domain"
 use_kotlinx_serialization = true
+
+[codegen.python]
+use_pydantic = true
+python_version = "3.11"
+type_hints = true
+
+[codegen.java]
+package = "com.example.domain"
+java_version = "17"  # Uses records
+use_lombok = false
+use_bean_validation = true
+
+[codegen.clojure]
+namespace = "com.example.domain"
+use_spec = true
 ```
 
 ### Extensibility
@@ -242,10 +338,22 @@ pub trait CodeGenerator {
 - Repository/persistence patterns are optional extensions
 
 ## References
+
+### Issues
 - [Issue #23: Implement Rust code generation](https://github.com/ibrahimcesar/SketchDDD/issues/23)
 - [Issue #24: Implement TypeScript code generation](https://github.com/ibrahimcesar/SketchDDD/issues/24)
 - [Issue #25: Implement Kotlin code generation](https://github.com/ibrahimcesar/SketchDDD/issues/25)
+- [Issue #36: Implement Python code generation](https://github.com/ibrahimcesar/SketchDDD/issues/36)
+- [Issue #37: Implement Java code generation](https://github.com/ibrahimcesar/SketchDDD/issues/37)
+- [Issue #38: Implement Clojure code generation](https://github.com/ibrahimcesar/SketchDDD/issues/38)
+
+### Related ADRs
 - [ADR-0006: DSL Syntax Design](0006-dsl-syntax-design.md)
 - [ADR-0005: Validation Error Code Conventions](0005-validation-error-code-conventions.md)
-- [Zod](https://zod.dev/) - TypeScript schema validation
-- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) - Kotlin serialization
+
+### Libraries by Language
+- **TypeScript**: [Zod](https://zod.dev/) - Schema validation
+- **Kotlin**: [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization)
+- **Python**: [Pydantic](https://docs.pydantic.dev/) - Data validation
+- **Java**: [Bean Validation](https://beanvalidation.org/) (JSR 380)
+- **Clojure**: [clojure.spec](https://clojure.org/guides/spec)
