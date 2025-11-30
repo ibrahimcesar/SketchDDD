@@ -79,9 +79,6 @@ File type pattern: `*.sddd`
 #### GitHub/GitLab Linguist
 Future: Submit `.sddd` to GitHub Linguist for syntax highlighting in repositories.
 
-### Legacy Support
-The CLI also accepts `.sketch` files for backward compatibility, but `.sddd` is preferred and used in all documentation and examples.
-
 ## Consequences
 
 ### Positive
@@ -97,7 +94,6 @@ The CLI also accepts `.sketch` files for backward compatibility, but `.sddd` is 
 - Need to register with GitHub Linguist for syntax highlighting
 
 ### Neutral
-- `.sketch` files still work but are discouraged
 - Extension is case-insensitive on Windows, case-sensitive on Unix
 
 ## Implementation Notes
