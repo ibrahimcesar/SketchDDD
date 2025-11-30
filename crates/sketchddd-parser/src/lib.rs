@@ -2,6 +2,11 @@
 //!
 //! Parser for the SketchDDD domain-specific language.
 //!
+//! This crate provides:
+//! - A pest-based parser that produces an AST
+//! - AST → Semantic Model transformation
+//! - Pretty-printing for debugging
+//!
 //! ## Example
 //!
 //! ```text
@@ -29,14 +34,42 @@
 //!   enum OrderStatus = Pending | Confirmed | Shipped | Cancelled
 //! }
 //! ```
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use sketchddd_parser::{parse_file, transform::transform, pretty::PrettyPrint};
+//!
+//! let source = r#"
+//!     context Commerce {
+//!         objects { Customer, Order }
+//!     }
+//! "#;
+//!
+//! // Parse to AST
+//! let file = parse_file(source)?;
+//!
+//! // Pretty-print the AST
+//! println!("{}", file.pretty_print());
+//!
+//! // Transform to semantic model
+//! let result = transform(&file)?;
+//! for ctx in result.contexts {
+//!     println!("Context: {}", ctx.name());
+//! }
+//! ```
 
 pub mod ast;
 pub mod error;
 pub mod grammar;
+pub mod pretty;
+pub mod transform;
 
 pub use ast::*;
 pub use error::ParseError;
 pub use grammar::Rule;
+pub use pretty::PrettyPrint;
+pub use transform::{transform, TransformResult, TransformWarning};
 
 use grammar::SketchDDDParser;
 use pest::Parser;

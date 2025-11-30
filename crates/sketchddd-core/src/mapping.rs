@@ -74,6 +74,38 @@ pub struct MorphismMapping {
     pub description: Option<String>,
 }
 
+/// A name-based mapping of objects between contexts.
+///
+/// This is used during parsing before object IDs are resolved.
+/// It can be converted to an `ObjectMapping` once contexts are built.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedObjectMapping {
+    /// Object name in the source context
+    pub source: String,
+
+    /// Object name in the target context
+    pub target: String,
+
+    /// Optional description of the mapping
+    pub description: Option<String>,
+}
+
+/// A name-based mapping of morphisms between contexts.
+///
+/// This is used during parsing before morphism IDs are resolved.
+/// It can be converted to a `MorphismMapping` once contexts are built.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedMorphismMapping {
+    /// Morphism name in the source context
+    pub source: String,
+
+    /// Morphism name in the target context
+    pub target: String,
+
+    /// Optional description of the mapping
+    pub description: Option<String>,
+}
+
 /// A context map describing the relationship between two bounded contexts.
 ///
 /// In category theory terms, this is a sketch morphism (functor)
@@ -228,6 +260,120 @@ impl ContextMap {
             RelationshipPattern::OpenHostService => "upstream → downstream (via services)",
             RelationshipPattern::SharedKernel => "bidirectional (shared)",
         }
+    }
+
+    /// Get the context map name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the source context name.
+    pub fn source_context(&self) -> &str {
+        &self.source_context
+    }
+
+    /// Get the target context name.
+    pub fn target_context(&self) -> &str {
+        &self.target_context
+    }
+
+    /// Get the relationship pattern.
+    pub fn pattern(&self) -> RelationshipPattern {
+        self.pattern
+    }
+
+    /// Get all object mappings.
+    pub fn object_mappings(&self) -> &[ObjectMapping] {
+        &self.object_mappings
+    }
+
+    /// Get all morphism mappings.
+    pub fn morphism_mappings(&self) -> &[MorphismMapping] {
+        &self.morphism_mappings
+    }
+}
+
+/// A context map with name-based mappings (for parsing before ID resolution).
+///
+/// This is an intermediate representation used during AST transformation.
+/// It can be resolved to a proper `ContextMap` with IDs once both contexts exist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedContextMap {
+    /// Name of this context map
+    pub name: String,
+
+    /// Name of the source (upstream) context
+    pub source_context: String,
+
+    /// Name of the target (downstream) context
+    pub target_context: String,
+
+    /// The relationship pattern
+    pub pattern: RelationshipPattern,
+
+    /// Object mappings by name
+    pub object_mappings: Vec<NamedObjectMapping>,
+
+    /// Morphism mappings by name
+    pub morphism_mappings: Vec<NamedMorphismMapping>,
+}
+
+impl NamedContextMap {
+    /// Create a new named context map.
+    pub fn new(
+        name: impl Into<String>,
+        source: impl Into<String>,
+        target: impl Into<String>,
+        pattern: RelationshipPattern,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            source_context: source.into(),
+            target_context: target.into(),
+            pattern,
+            object_mappings: Vec::new(),
+            morphism_mappings: Vec::new(),
+        }
+    }
+
+    /// Add an object mapping by name.
+    pub fn add_object_mapping(&mut self, mapping: NamedObjectMapping) {
+        self.object_mappings.push(mapping);
+    }
+
+    /// Add a morphism mapping by name.
+    pub fn add_morphism_mapping(&mut self, mapping: NamedMorphismMapping) {
+        self.morphism_mappings.push(mapping);
+    }
+
+    /// Get the context map name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the source context name.
+    pub fn source_context(&self) -> &str {
+        &self.source_context
+    }
+
+    /// Get the target context name.
+    pub fn target_context(&self) -> &str {
+        &self.target_context
+    }
+
+    /// Get the relationship pattern.
+    pub fn pattern(&self) -> RelationshipPattern {
+        self.pattern
+    }
+
+    /// Get all object mappings.
+    pub fn object_mappings(&self) -> &[NamedObjectMapping] {
+        &self.object_mappings
+    }
+
+    /// Get all morphism mappings.
+    pub fn morphism_mappings(&self) -> &[NamedMorphismMapping] {
+        &self.morphism_mappings
     }
 }
 
