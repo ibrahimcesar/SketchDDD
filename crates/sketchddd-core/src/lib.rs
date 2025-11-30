@@ -29,6 +29,9 @@ pub mod sketch;
 pub mod validation;
 
 pub use context::{BoundedContext, Invariant};
-pub use mapping::ContextMap;
+pub use mapping::{
+    check_functorial_consistency, ContextMap, FunctorCheckResult, FunctorError, MorphismMapping,
+    ObjectMapping, RelationshipPattern,
+};
 pub use sketch::Sketch;
 pub use validation::{ValidationError, ValidationResult};
