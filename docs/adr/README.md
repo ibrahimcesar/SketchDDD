@@ -19,17 +19,10 @@ An Architecture Decision Record (ADR) is a document that captures an important a
 | [0006](0006-dsl-syntax-design.md) | DSL Syntax Design | Accepted |
 | [0007](0007-file-extension-convention.md) | File Extension Convention (.sddd) | Accepted |
 | [0008](0008-code-generation-architecture.md) | Code Generation Architecture | Accepted |
-
-## Proposed ADRs (To Be Written)
-
-The following decisions need ADRs to be written during development:
-
-| Proposed ADR | Related Issues | Phase |
-|--------------|----------------|-------|
-| Rich Error Messages | #12 | Phase 2 |
-| WASM API Design | #13 | Phase 3 |
-| State Management Strategy | #14, #22 | Phase 3-4 |
-| Template Format Specification | #19 | Phase 4 |
+| [0009](0009-rich-error-messages.md) | Rich Error Messages | Accepted |
+| [0010](0010-wasm-api-design.md) | WASM API Design | Accepted |
+| [0011](0011-state-management-strategy.md) | State Management Strategy | Accepted |
+| [0012](0012-template-format-specification.md) | Template Format Specification | Accepted |
 
 ## How to Create an ADR
 

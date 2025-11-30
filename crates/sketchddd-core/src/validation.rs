@@ -7,10 +7,11 @@
 //! - Value object field validation
 //! - Enum variant uniqueness
 //! - Context map reference validation
+//! - Path equation validation (morphism composition)
 
 use crate::context::BoundedContext;
 use crate::mapping::NamedContextMap;
-use crate::sketch::{ObjectId, Sketch};
+use crate::sketch::{Graph, MorphismId, ObjectId, Path, PathEquation, Sketch};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -183,7 +184,7 @@ pub fn validate_sketch(sketch: &Sketch) -> ValidationResult {
         }
     }
 
-    // Check that equations are well-formed
+    // Check that equations are well-formed (basic check - detailed validation in validate_equations)
     for equation in &sketch.equations {
         if !equation.is_well_formed() {
             result.add(ValidationError::error(
@@ -194,6 +195,12 @@ pub fn validate_sketch(sketch: &Sketch) -> ValidationResult {
                 ),
             ));
         }
+    }
+
+    // Validate equation paths (morphism composition)
+    let equation_result = validate_equations(sketch);
+    for issue in equation_result.issues {
+        result.add(issue);
     }
 
     // Check for duplicate object names
@@ -230,6 +237,240 @@ pub fn validate_sketch(sketch: &Sketch) -> ValidationResult {
 /// Validate that an object exists in a sketch.
 pub fn object_exists(sketch: &Sketch, id: ObjectId) -> bool {
     sketch.graph.get_object(id).is_some()
+}
+
+// =============================================================
+// Path Equation Validation
+// =============================================================
+
+/// Validate a path for correctness within a graph.
+///
+/// This checks:
+/// - E0100: Source object exists
+/// - E0101: Target object exists
+/// - E0102: All morphisms in path exist
+/// - E0103: Morphisms compose correctly (target of morphism[i] == source of morphism[i+1])
+/// - E0104: Path source matches first morphism's source
+/// - E0105: Path target matches last morphism's target
+pub fn validate_path(path: &Path, graph: &Graph, path_name: &str) -> ValidationResult {
+    let mut result = ValidationResult::new();
+
+    // E0100: Check source object exists
+    if graph.get_object(path.source).is_none() {
+        result.add(ValidationError::error(
+            "E0100",
+            format!(
+                "Path '{}' references non-existent source object (id: {:?})",
+                path_name, path.source
+            ),
+        ));
+        return result; // Can't continue validation without source
+    }
+
+    // E0101: Check target object exists
+    if graph.get_object(path.target).is_none() {
+        result.add(ValidationError::error(
+            "E0101",
+            format!(
+                "Path '{}' references non-existent target object (id: {:?})",
+                path_name, path.target
+            ),
+        ));
+    }
+
+    // Identity paths are valid if source/target exist
+    if path.morphisms.is_empty() {
+        if path.source != path.target {
+            result.add(ValidationError::error(
+                "E0106",
+                format!(
+                    "Path '{}' has no morphisms but source and target differ",
+                    path_name
+                ),
+            ));
+        }
+        return result;
+    }
+
+    // Validate morphism sequence
+    let mut current_object = path.source;
+
+    for (i, &morph_id) in path.morphisms.iter().enumerate() {
+        // E0102: Check morphism exists
+        let morphism = match graph.get_morphism(morph_id) {
+            Some(m) => m,
+            None => {
+                result.add(ValidationError::error(
+                    "E0102",
+                    format!(
+                        "Path '{}' references non-existent morphism at position {} (id: {:?})",
+                        path_name, i, morph_id
+                    ),
+                ));
+                continue;
+            }
+        };
+
+        // E0103: Check morphism source matches current position
+        if i == 0 {
+            // E0104: First morphism's source must match path source
+            if morphism.source != path.source {
+                result.add(ValidationError::error(
+                    "E0104",
+                    format!(
+                        "Path '{}' source ({:?}) doesn't match first morphism '{}' source ({:?})",
+                        path_name,
+                        path.source,
+                        morphism.name,
+                        morphism.source
+                    ),
+                ));
+            }
+        } else if morphism.source != current_object {
+            result.add(ValidationError::error(
+                "E0103",
+                format!(
+                    "Path '{}' has non-composable morphisms at position {}: morphism '{}' expects source {:?} but previous morphism ends at {:?}",
+                    path_name, i, morphism.name, morphism.source, current_object
+                ),
+            ));
+        }
+
+        current_object = morphism.target;
+    }
+
+    // E0105: Check final morphism's target matches path target
+    if current_object != path.target {
+        result.add(ValidationError::error(
+            "E0105",
+            format!(
+                "Path '{}' declared target ({:?}) doesn't match computed target ({:?})",
+                path_name, path.target, current_object
+            ),
+        ));
+    }
+
+    result
+}
+
+/// Validate a path equation for correctness.
+///
+/// This validates both LHS and RHS paths, and checks they have matching endpoints.
+pub fn validate_equation(equation: &PathEquation, graph: &Graph) -> ValidationResult {
+    let mut result = ValidationResult::new();
+
+    // Validate LHS path
+    let lhs_name = format!("{} (LHS)", equation.name);
+    let lhs_result = validate_path(&equation.lhs, graph, &lhs_name);
+    for issue in lhs_result.issues {
+        result.add(issue);
+    }
+
+    // Validate RHS path
+    let rhs_name = format!("{} (RHS)", equation.name);
+    let rhs_result = validate_path(&equation.rhs, graph, &rhs_name);
+    for issue in rhs_result.issues {
+        result.add(issue);
+    }
+
+    // E0107: Check sources match (already covered by is_well_formed but with better message)
+    if equation.lhs.source != equation.rhs.source {
+        let lhs_source_name = graph
+            .get_object(equation.lhs.source)
+            .map(|o| o.name.as_str())
+            .unwrap_or("unknown");
+        let rhs_source_name = graph
+            .get_object(equation.rhs.source)
+            .map(|o| o.name.as_str())
+            .unwrap_or("unknown");
+
+        result.add(
+            ValidationError::error(
+                "E0107",
+                format!(
+                    "Equation '{}' has mismatched sources: LHS starts at '{}', RHS starts at '{}'",
+                    equation.name, lhs_source_name, rhs_source_name
+                ),
+            )
+            .with_suggestion("Both sides of an equation must start from the same object"),
+        );
+    }
+
+    // E0108: Check targets match
+    if equation.lhs.target != equation.rhs.target {
+        let lhs_target_name = graph
+            .get_object(equation.lhs.target)
+            .map(|o| o.name.as_str())
+            .unwrap_or("unknown");
+        let rhs_target_name = graph
+            .get_object(equation.rhs.target)
+            .map(|o| o.name.as_str())
+            .unwrap_or("unknown");
+
+        result.add(
+            ValidationError::error(
+                "E0108",
+                format!(
+                    "Equation '{}' has mismatched targets: LHS ends at '{}', RHS ends at '{}'",
+                    equation.name, lhs_target_name, rhs_target_name
+                ),
+            )
+            .with_suggestion("Both sides of an equation must end at the same object"),
+        );
+    }
+
+    // W0100: Warn about trivial equations (both sides are identity paths)
+    if equation.lhs.is_identity() && equation.rhs.is_identity() {
+        result.add(ValidationError::warning(
+            "W0100",
+            format!(
+                "Equation '{}' is trivial: both sides are identity paths",
+                equation.name
+            ),
+        ));
+    }
+
+    // W0101: Warn about very long paths
+    if equation.lhs.len() > 5 || equation.rhs.len() > 5 {
+        result.add(
+            ValidationError::warning(
+                "W0101",
+                format!(
+                    "Equation '{}' has a long path ({} morphisms). Consider simplifying.",
+                    equation.name,
+                    std::cmp::max(equation.lhs.len(), equation.rhs.len())
+                ),
+            )
+            .with_suggestion("Long paths may indicate overly complex business rules"),
+        );
+    }
+
+    result
+}
+
+/// Validate all equations in a sketch.
+pub fn validate_equations(sketch: &Sketch) -> ValidationResult {
+    let mut result = ValidationResult::new();
+
+    for equation in &sketch.equations {
+        let eq_result = validate_equation(equation, &sketch.graph);
+        for issue in eq_result.issues {
+            result.add(issue);
+        }
+    }
+
+    // Check for duplicate equation names
+    let mut seen_names: HashSet<&str> = HashSet::new();
+    for equation in &sketch.equations {
+        if !equation.name.is_empty() && !seen_names.insert(&equation.name) {
+            result.add(ValidationError::warning(
+                "W0102",
+                format!("Duplicate equation name: '{}'", equation.name),
+            ));
+        }
+    }
+
+    result
 }
 
 // =============================================================
@@ -646,6 +887,270 @@ mod tests {
         let result = validate_sketch(&sketch);
         assert!(!result.is_ok());
         assert!(result.errors().any(|e| e.code == "E0002"));
+    }
+
+    // =============================================================
+    // Path Equation Validation Tests
+    // =============================================================
+
+    #[test]
+    fn test_valid_identity_path() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+
+        let path = Path::identity(order);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_valid_single_morphism_path() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+        let placed_by = graph.add_morphism("placedBy", order, customer);
+
+        let path = Path::new(order, customer, vec![placed_by]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_valid_multi_morphism_path() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let line_item = graph.add_object("LineItem");
+        let product = graph.add_object("Product");
+
+        let items = graph.add_morphism("items", order, line_item);
+        let product_morph = graph.add_morphism("product", line_item, product);
+
+        let path = Path::new(order, product, vec![items, product_morph]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_path_with_non_existent_source_object() {
+        let graph = crate::sketch::Graph::new();
+
+        let path = Path::identity(ObjectId(999));
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0100"));
+    }
+
+    #[test]
+    fn test_path_with_non_existent_morphism() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+
+        // Reference a non-existent morphism
+        let path = Path::new(order, customer, vec![MorphismId(999)]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0102"));
+    }
+
+    #[test]
+    fn test_path_with_non_composable_morphisms() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+        let product = graph.add_object("Product");
+
+        // Order -> Customer
+        let placed_by = graph.add_morphism("placedBy", order, customer);
+        // Product -> Customer (not Order -> Product, so can't compose)
+        let sold_to = graph.add_morphism("soldTo", product, customer);
+
+        // Try to compose: Order -placedBy-> Customer, Product -soldTo-> Customer
+        // This should fail because placedBy ends at Customer, but soldTo starts at Product
+        let path = Path::new(order, customer, vec![placed_by, sold_to]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0103"));
+    }
+
+    #[test]
+    fn test_path_source_mismatch() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+        let product = graph.add_object("Product");
+
+        // Morphism from Order -> Customer
+        let placed_by = graph.add_morphism("placedBy", order, customer);
+
+        // But path says it starts at Product
+        let path = Path::new(product, customer, vec![placed_by]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0104"));
+    }
+
+    #[test]
+    fn test_path_target_mismatch() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+        let product = graph.add_object("Product");
+
+        // Morphism from Order -> Customer
+        let placed_by = graph.add_morphism("placedBy", order, customer);
+
+        // But path says it ends at Product
+        let path = Path::new(order, product, vec![placed_by]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0105"));
+    }
+
+    #[test]
+    fn test_empty_path_with_different_source_target() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+
+        // No morphisms but different source/target
+        let path = Path::new(order, customer, vec![]);
+        let result = validate_path(&path, &graph, "test_path");
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0106"));
+    }
+
+    #[test]
+    fn test_valid_equation() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+
+        let lhs = Path::identity(order);
+        let rhs = Path::identity(order);
+        let equation = PathEquation::new("identity_eq", lhs, rhs);
+
+        let result = validate_equation(&equation, &graph);
+
+        // Valid but trivial (W0100 warning)
+        assert!(result.is_ok());
+        assert!(result.warnings().any(|e| e.code == "W0100"));
+    }
+
+    #[test]
+    fn test_equation_with_mismatched_sources() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+
+        let lhs = Path::identity(order);
+        let rhs = Path::identity(customer);
+        let equation = PathEquation::new("bad_eq", lhs, rhs);
+
+        let result = validate_equation(&equation, &graph);
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0107"));
+    }
+
+    #[test]
+    fn test_equation_with_mismatched_targets() {
+        let mut graph = crate::sketch::Graph::new();
+        let order = graph.add_object("Order");
+        let customer = graph.add_object("Customer");
+        let product = graph.add_object("Product");
+
+        let placed_by = graph.add_morphism("placedBy", order, customer);
+        let contains = graph.add_morphism("contains", order, product);
+
+        let lhs = Path::new(order, customer, vec![placed_by]);
+        let rhs = Path::new(order, product, vec![contains]);
+        let equation = PathEquation::new("target_mismatch", lhs, rhs);
+
+        let result = validate_equation(&equation, &graph);
+
+        assert!(!result.is_ok());
+        assert!(result.errors().any(|e| e.code == "E0108"));
+    }
+
+    #[test]
+    fn test_equation_with_long_path_warning() {
+        let mut graph = crate::sketch::Graph::new();
+
+        // Create a long chain of objects
+        let a = graph.add_object("A");
+        let b = graph.add_object("B");
+        let c = graph.add_object("C");
+        let d = graph.add_object("D");
+        let e = graph.add_object("E");
+        let f = graph.add_object("F");
+        let g = graph.add_object("G");
+
+        let ab = graph.add_morphism("ab", a, b);
+        let bc = graph.add_morphism("bc", b, c);
+        let cd = graph.add_morphism("cd", c, d);
+        let de = graph.add_morphism("de", d, e);
+        let ef = graph.add_morphism("ef", e, f);
+        let fg = graph.add_morphism("fg", f, g);
+
+        let lhs = Path::new(a, g, vec![ab, bc, cd, de, ef, fg]);
+        let rhs = Path::new(a, g, vec![ab, bc, cd, de, ef, fg]);
+        let equation = PathEquation::new("long_path", lhs, rhs);
+
+        let result = validate_equation(&equation, &graph);
+
+        assert!(result.is_ok()); // Warnings don't fail validation
+        assert!(result.warnings().any(|e| e.code == "W0101"));
+    }
+
+    #[test]
+    fn test_duplicate_equation_names_warning() {
+        let mut sketch = Sketch::new("Test");
+        let order = sketch.add_object("Order");
+
+        // Add two equations with the same name
+        let eq1 = PathEquation::new("my_rule", Path::identity(order), Path::identity(order));
+        let eq2 = PathEquation::new("my_rule", Path::identity(order), Path::identity(order));
+
+        sketch.equations.push(eq1);
+        sketch.equations.push(eq2);
+
+        let result = validate_equations(&sketch);
+
+        assert!(result.is_ok()); // Warnings don't fail validation
+        assert!(result.warnings().any(|e| e.code == "W0102"));
+    }
+
+    #[test]
+    fn test_validate_sketch_with_equations() {
+        let mut sketch = Sketch::new("Commerce");
+        let order = sketch.add_object("Order");
+        let customer = sketch.add_object("Customer");
+        let total = sketch.add_object("Money");
+
+        let _placed_by = sketch.graph.add_morphism("placedBy", order, customer);
+        let total_price = sketch.graph.add_morphism("totalPrice", order, total);
+
+        // Valid equation: different paths from Order to same target would be equal
+        // For this test, we just verify the validation runs without error on valid morphisms
+        let eq = PathEquation::new(
+            "price_consistency",
+            Path::new(order, total, vec![total_price]),
+            Path::new(order, total, vec![total_price]), // Same path for simplicity
+        );
+        sketch.equations.push(eq);
+
+        let result = validate_sketch(&sketch);
+
+        assert!(result.is_ok(), "Errors: {:?}", result.errors().collect::<Vec<_>>());
     }
 
     // =============================================================

@@ -89,9 +89,31 @@ context Commerce {
 - 📝 **Text DSL** - Full control for developers
 - ✅ **Validation** - Catch errors before runtime
 - 🔗 **Context Maps** - Model system integration
-- 🏭 **Code Generation** - Rust, TypeScript, Kotlin
+- 🏭 **Code Generation** - Rust, TypeScript, Kotlin, Python, Java, Clojure
 - 📊 **Diagrams** - Auto-generated visualizations
 - 📚 **Templates** - Start with common patterns
+
+---
+
+## Editor Support (Roadmap)
+
+We're committed to providing first-class editor support for `.sddd` files:
+
+| Editor | Status | Features |
+|--------|--------|----------|
+| **VS Code** | 🔜 Planned | Full LSP support, syntax highlighting, snippets |
+| **Neovim** | 🔜 Planned | LSP via nvim-lspconfig |
+| **Helix** | 🔜 Planned | LSP support |
+| **JetBrains** | 📋 Future | Plugin with full IDE integration |
+
+**Language Server Protocol (LSP)** will provide:
+- Syntax highlighting and diagnostics
+- Auto-completion for keywords, objects, and morphisms
+- Go to definition and find references
+- Hover documentation
+- Code formatting
+
+Track progress: [Issue #44](https://github.com/ibrahimcesar/SketchDDD/issues/44)
 
 ---
 
