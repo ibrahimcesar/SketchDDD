@@ -1,40 +1,629 @@
-//! Rust code generation.
+//! Rust code generation for SketchDDD domain models.
+//!
+//! Generates idiomatic Rust code from a bounded context:
+//! - Entities as structs with newtype ID wrappers
+//! - Value objects as structs with structural equality
+//! - Aggregates with validation methods
+//! - Enums for sum types
+//! - Morphisms as struct fields
 
-use sketchddd_core::BoundedContext;
 use crate::CodegenError;
+use sketchddd_core::sketch::{ColimitCocone, LimitCone, Morphism, ObjectId};
+use sketchddd_core::BoundedContext;
+use std::collections::{HashMap, HashSet};
 
-/// Generate Rust code from a bounded context.
+/// Configuration options for Rust code generation.
+#[derive(Debug, Clone)]
+pub struct RustConfig {
+    /// Derive macros to add to all structs
+    pub derives: Vec<String>,
+    /// Whether to use the builder pattern for structs
+    pub use_builder_pattern: bool,
+    /// Whether to generate validation methods
+    pub generate_validation: bool,
+    /// Module name (defaults to context name in snake_case)
+    pub module_name: Option<String>,
+}
+
+impl Default for RustConfig {
+    fn default() -> Self {
+        Self {
+            derives: vec![
+                "Debug".into(),
+                "Clone".into(),
+                "Serialize".into(),
+                "Deserialize".into(),
+            ],
+            use_builder_pattern: false,
+            generate_validation: true,
+            module_name: None,
+        }
+    }
+}
+
+/// Generate Rust code from a bounded context with default configuration.
 pub fn generate(context: &BoundedContext) -> Result<String, CodegenError> {
-    let mut output = String::new();
+    generate_with_config(context, &RustConfig::default())
+}
 
-    output.push_str(&format!("//! Generated from {} bounded context\n\n", context.name()));
-    output.push_str("use serde::{Deserialize, Serialize};\n\n");
+/// Generate Rust code from a bounded context with custom configuration.
+pub fn generate_with_config(
+    context: &BoundedContext,
+    config: &RustConfig,
+) -> Result<String, CodegenError> {
+    let mut gen = RustGenerator::new(context, config);
+    gen.generate()
+}
 
-    // Generate entities
-    for entity_id in context.entities() {
-        if let Some(entity) = context.graph().get_object(*entity_id) {
-            output.push_str(&format!(
-                "/// Entity: {}\n#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct {} {{\n    pub id: {}Id,\n}}\n\n",
-                entity.name, entity.name, entity.name
-            ));
-            output.push_str(&format!(
-                "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]\npub struct {}Id(pub uuid::Uuid);\n\n",
-                entity.name
-            ));
+/// Internal generator state.
+struct RustGenerator<'a> {
+    context: &'a BoundedContext,
+    config: &'a RustConfig,
+    output: String,
+    entity_ids: HashSet<ObjectId>,
+    value_object_ids: HashSet<ObjectId>,
+    aggregate_roots: HashSet<ObjectId>,
+    /// Maps object IDs to their names for quick lookup
+    object_names: HashMap<ObjectId, String>,
+    /// Maps object IDs to their outgoing morphisms
+    object_morphisms: HashMap<ObjectId, Vec<&'a Morphism>>,
+}
+
+impl<'a> RustGenerator<'a> {
+    fn new(context: &'a BoundedContext, config: &'a RustConfig) -> Self {
+        // Pre-compute lookups
+        let entity_ids: HashSet<_> = context.entities().iter().copied().collect();
+        let value_object_ids: HashSet<_> = context.value_objects().iter().copied().collect();
+        let aggregate_roots: HashSet<_> = context.aggregate_roots().iter().copied().collect();
+
+        let object_names: HashMap<_, _> = context
+            .graph()
+            .objects()
+            .map(|o| (o.id, o.name.clone()))
+            .collect();
+
+        // Group morphisms by source object (excluding identity morphisms)
+        let mut object_morphisms: HashMap<ObjectId, Vec<&Morphism>> = HashMap::new();
+        for morphism in context.graph().morphisms() {
+            if !morphism.is_identity {
+                object_morphisms
+                    .entry(morphism.source)
+                    .or_default()
+                    .push(morphism);
+            }
+        }
+
+        Self {
+            context,
+            config,
+            output: String::new(),
+            entity_ids,
+            value_object_ids,
+            aggregate_roots,
+            object_names,
+            object_morphisms,
         }
     }
 
-    // Generate value objects
-    for vo_id in context.value_objects() {
-        if let Some(vo) = context.graph().get_object(*vo_id) {
-            output.push_str(&format!(
-                "/// Value Object: {}\n#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\npub struct {} {{\n    // TODO: Add fields\n}}\n\n",
-                vo.name, vo.name
-            ));
+    fn generate(&mut self) -> Result<String, CodegenError> {
+        self.write_header();
+        self.write_imports();
+        self.write_entities();
+        self.write_value_objects();
+        self.write_enums();
+        self.write_aggregates();
+
+        Ok(std::mem::take(&mut self.output))
+    }
+
+    fn write_header(&mut self) {
+        let module_name = self
+            .config
+            .module_name
+            .clone()
+            .unwrap_or_else(|| to_snake_case(self.context.name()));
+
+        self.output.push_str(&format!(
+            r#"//! Generated from `{}` bounded context.
+//!
+//! This file was automatically generated by SketchDDD.
+//! DO NOT EDIT - changes will be overwritten.
+//!
+//! To regenerate: `sketchddd codegen <model>.sddd --target rust`
+
+#![allow(dead_code)]
+
+"#,
+            module_name
+        ));
+    }
+
+    fn write_imports(&mut self) {
+        self.output.push_str("use serde::{Deserialize, Serialize};\n");
+
+        // Check if we need uuid
+        if !self.entity_ids.is_empty() {
+            self.output.push_str("use uuid::Uuid;\n");
+        }
+
+        self.output.push_str("\n");
+    }
+
+    fn write_entities(&mut self) {
+        if self.entity_ids.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Entities\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for entity_id in self.context.entities() {
+            if let Some(entity) = self.context.graph().get_object(*entity_id) {
+                self.write_entity_id_type(&entity.name);
+                self.write_entity_struct(&entity.name, *entity_id);
+            }
         }
     }
 
-    Ok(output)
+    fn write_entity_id_type(&mut self, name: &str) {
+        let derives = self.format_derives(&["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash", "Serialize", "Deserialize"]);
+
+        self.output.push_str(&format!(
+            r#"/// Unique identifier for [`{name}`].
+{derives}
+pub struct {name}Id(pub Uuid);
+
+impl {name}Id {{
+    /// Create a new random ID.
+    pub fn new() -> Self {{
+        Self(Uuid::new_v4())
+    }}
+
+    /// Create from an existing UUID.
+    pub fn from_uuid(uuid: Uuid) -> Self {{
+        Self(uuid)
+    }}
+}}
+
+impl Default for {name}Id {{
+    fn default() -> Self {{
+        Self::new()
+    }}
+}}
+
+impl std::fmt::Display for {name}Id {{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+        write!(f, "{{}}", self.0)
+    }}
+}}
+
+"#
+        ));
+    }
+
+    fn write_entity_struct(&mut self, name: &str, object_id: ObjectId) {
+        let derives = self.format_derives(&self.config.derives.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+
+        let is_aggregate_root = self.aggregate_roots.contains(&object_id);
+        let root_note = if is_aggregate_root {
+            " (Aggregate Root)"
+        } else {
+            ""
+        };
+
+        self.output.push_str(&format!(
+            r#"/// Entity: {name}{root_note}
+///
+/// An entity has a unique identity that persists through state changes.
+{derives}
+pub struct {name} {{
+    /// Unique identifier
+    pub id: {name}Id,
+"#
+        ));
+
+        // Add fields from morphisms - collect field strings first to avoid borrow issues
+        let field_strs: Vec<String> = self
+            .object_morphisms
+            .get(&object_id)
+            .map(|morphisms| {
+                morphisms
+                    .iter()
+                    .map(|m| self.format_field_string(m))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("}\n\n");
+
+        // Generate impl block
+        self.write_entity_impl(name, object_id);
+    }
+
+    fn write_entity_impl(&mut self, name: &str, object_id: ObjectId) {
+        let morphisms = self.object_morphisms.get(&object_id);
+
+        self.output.push_str(&format!("impl {name} {{\n"));
+
+        // Constructor
+        self.output.push_str("    /// Create a new entity with a generated ID.\n");
+        self.output.push_str("    pub fn new(");
+
+        // Parameters (excluding id)
+        if let Some(morphisms) = morphisms {
+            let params: Vec<String> = morphisms
+                .iter()
+                .map(|m| format!("{}: {}", to_snake_case(&m.name), self.rust_type_for_target(m.target)))
+                .collect();
+            self.output.push_str(&params.join(", "));
+        }
+
+        self.output.push_str(") -> Self {\n");
+        self.output.push_str("        Self {\n");
+        self.output.push_str(&format!("            id: {name}Id::new(),\n"));
+
+        if let Some(morphisms) = morphisms {
+            for morphism in morphisms {
+                let field_name = to_snake_case(&morphism.name);
+                self.output.push_str(&format!("            {field_name},\n"));
+            }
+        }
+
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("}\n\n");
+    }
+
+    fn write_value_objects(&mut self) {
+        if self.value_object_ids.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Value Objects\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for vo_id in self.context.value_objects() {
+            if let Some(vo) = self.context.graph().get_object(*vo_id) {
+                self.write_value_object(&vo.name, *vo_id);
+            }
+        }
+    }
+
+    fn write_value_object(&mut self, name: &str, object_id: ObjectId) {
+        // Value objects need PartialEq, Eq for structural equality
+        let mut derives: Vec<&str> = vec!["Debug", "Clone", "PartialEq", "Eq", "Hash", "Serialize", "Deserialize"];
+
+        // Remove duplicates with config derives
+        let config_derives: HashSet<&str> = self.config.derives.iter().map(|s| s.as_str()).collect();
+        for d in &config_derives {
+            if !derives.contains(d) {
+                derives.push(d);
+            }
+        }
+
+        let derives_str = self.format_derives(&derives);
+
+        // Check if this value object has a limit cone definition with projections
+        let limit_cone = self.context.get_value_object_limit(object_id);
+
+        self.output.push_str(&format!(
+            r#"/// Value Object: {name}
+///
+/// A value object is defined by its attributes, not identity.
+/// Two value objects with the same attributes are considered equal.
+{derives_str}
+pub struct {name} {{
+"#
+        ));
+
+        // Add fields from morphisms or projections - collect first to avoid borrow issues
+        let field_strs: Vec<String> = if let Some(morphisms) = self.object_morphisms.get(&object_id) {
+            morphisms.iter().map(|m| self.format_field_string(m)).collect()
+        } else if let Some(cone) = limit_cone {
+            cone.projections
+                .iter()
+                .filter_map(|proj| self.context.graph().get_morphism(proj.morphism))
+                .map(|m| self.format_field_string(m))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("}\n\n");
+
+        // Generate impl block for value objects
+        self.write_value_object_impl(name, object_id);
+    }
+
+    fn write_value_object_impl(&mut self, name: &str, object_id: ObjectId) {
+        let morphisms = self.object_morphisms.get(&object_id);
+
+        self.output.push_str(&format!("impl {name} {{\n"));
+
+        // Constructor
+        self.output.push_str("    /// Create a new value object.\n");
+        self.output.push_str("    pub fn new(");
+
+        if let Some(morphisms) = morphisms {
+            let params: Vec<String> = morphisms
+                .iter()
+                .map(|m| format!("{}: {}", to_snake_case(&m.name), self.rust_type_for_target(m.target)))
+                .collect();
+            self.output.push_str(&params.join(", "));
+        }
+
+        self.output.push_str(") -> Self {\n");
+        self.output.push_str("        Self {\n");
+
+        if let Some(morphisms) = morphisms {
+            for morphism in morphisms {
+                let field_name = to_snake_case(&morphism.name);
+                self.output.push_str(&format!("            {field_name},\n"));
+            }
+        }
+
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("}\n\n");
+    }
+
+    fn write_enums(&mut self) {
+        let colimits = &self.context.sketch().colimits;
+        if colimits.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Enumerations (Sum Types)\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for colimit in colimits {
+            self.write_enum(colimit);
+        }
+    }
+
+    fn write_enum(&mut self, colimit: &ColimitCocone) {
+        let derives = self.format_derives(&["Debug", "Clone", "PartialEq", "Eq", "Hash", "Serialize", "Deserialize"]);
+
+        self.output.push_str(&format!(
+            r#"/// Enumeration: {}
+///
+/// A sum type representing one of several possible variants.
+{}
+pub enum {} {{
+"#,
+            colimit.name, derives, colimit.name
+        ));
+
+        // Check if this is a simple enum (all variants have same source as apex)
+        // or a sum type with different variant types
+        let is_simple_enum = colimit.injections.iter().all(|i| i.source == colimit.apex);
+
+        for injection in &colimit.injections {
+            if is_simple_enum {
+                self.output.push_str(&format!("    /// Variant: {}\n", injection.name));
+                self.output.push_str(&format!("    {},\n", injection.name));
+            } else {
+                // Sum type with payload
+                let variant_type = self
+                    .object_names
+                    .get(&injection.source)
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string());
+                self.output.push_str(&format!("    /// Variant: {} with payload\n", injection.name));
+                self.output.push_str(&format!("    {}({}),\n", injection.name, variant_type));
+            }
+        }
+
+        self.output.push_str("}\n\n");
+
+        // Generate impl block for enums
+        self.write_enum_impl(colimit, is_simple_enum);
+    }
+
+    fn write_enum_impl(&mut self, colimit: &ColimitCocone, is_simple_enum: bool) {
+        self.output.push_str(&format!("impl {} {{\n", colimit.name));
+
+        // Generate is_* methods for each variant
+        for injection in &colimit.injections {
+            let method_name = to_snake_case(&injection.name);
+            let variant_name = &injection.name;
+
+            self.output.push_str(&format!(
+                "    /// Returns `true` if this is the `{variant_name}` variant.\n"
+            ));
+            if is_simple_enum {
+                self.output.push_str(&format!(
+                    "    pub fn is_{method_name}(&self) -> bool {{\n"
+                ));
+                self.output.push_str(&format!(
+                    "        matches!(self, Self::{variant_name})\n"
+                ));
+            } else {
+                self.output.push_str(&format!(
+                    "    pub fn is_{method_name}(&self) -> bool {{\n"
+                ));
+                self.output.push_str(&format!(
+                    "        matches!(self, Self::{variant_name}(_))\n"
+                ));
+            }
+            self.output.push_str("    }\n\n");
+        }
+
+        self.output.push_str("}\n\n");
+    }
+
+    fn write_aggregates(&mut self) {
+        let limits: Vec<_> = self
+            .context
+            .sketch()
+            .limits
+            .iter()
+            .filter(|l| l.is_aggregate)
+            .collect();
+
+        if limits.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Aggregate Validation\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        self.write_validation_error();
+
+        for limit in limits {
+            self.write_aggregate_validation(limit);
+        }
+    }
+
+    fn write_validation_error(&mut self) {
+        self.output.push_str(
+            r#"/// Error returned when aggregate validation fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationError {
+    /// The invariant that was violated.
+    pub invariant: String,
+    /// Human-readable error message.
+    pub message: String,
+}
+
+impl ValidationError {
+    /// Create a new validation error.
+    pub fn new(invariant: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            invariant: invariant.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invariant '{}' violated: {}", self.invariant, self.message)
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+"#,
+        );
+    }
+
+    fn write_aggregate_validation(&mut self, limit: &LimitCone) {
+        let root_id = match limit.root {
+            Some(id) => id,
+            None => return,
+        };
+
+        let root_name = self
+            .object_names
+            .get(&root_id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Collect member names
+        let member_names: Vec<String> = limit
+            .projections
+            .iter()
+            .filter_map(|p| self.object_names.get(&p.target).cloned())
+            .collect();
+
+        self.output.push_str(&format!(
+            r#"/// Aggregate: {}
+///
+/// Root: [`{}`]
+/// Members: {:?}
+impl {} {{
+    /// Validate all aggregate invariants.
+    ///
+    /// Call this method after making changes to ensure the aggregate
+    /// is in a valid state.
+    pub fn validate(&self) -> Result<(), ValidationError> {{
+        // TODO: Add invariant validation logic based on model equations
+        //
+        // Example invariant:
+        // if self.total_price != self.items.iter().map(|i| i.price).sum() {{
+        //     return Err(ValidationError::new(
+        //         "totalPrice",
+        //         "totalPrice must equal sum of item prices"
+        //     ));
+        // }}
+        Ok(())
+    }}
+
+    /// Validate and return self, useful for builder patterns.
+    pub fn validated(self) -> Result<Self, ValidationError> {{
+        self.validate()?;
+        Ok(self)
+    }}
+}}
+
+"#,
+            limit.name, root_name, member_names, root_name
+        ));
+    }
+
+    fn format_field_string(&self, morphism: &Morphism) -> String {
+        let field_name = to_snake_case(&morphism.name);
+        let field_type = self.rust_type_for_target(morphism.target);
+
+        let mut result = String::new();
+        if let Some(desc) = &morphism.description {
+            result.push_str(&format!("    /// {}\n", desc));
+        }
+        result.push_str(&format!("    pub {}: {},\n", field_name, field_type));
+        result
+    }
+
+    fn rust_type_for_target(&self, target: ObjectId) -> String {
+        let target_name = self
+            .object_names
+            .get(&target)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Check if target is an entity - use ID reference
+        if self.entity_ids.contains(&target) {
+            format!("{}Id", target_name)
+        } else {
+            target_name
+        }
+    }
+
+    fn format_derives(&self, derives: &[&str]) -> String {
+        if derives.is_empty() {
+            String::new()
+        } else {
+            format!("#[derive({})]", derives.join(", "))
+        }
+    }
+}
+
+/// Convert PascalCase to snake_case.
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('_');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -42,9 +631,214 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_to_snake_case() {
+        assert_eq!(to_snake_case("Customer"), "customer");
+        assert_eq!(to_snake_case("OrderId"), "order_id");
+        assert_eq!(to_snake_case("LineItem"), "line_item");
+        assert_eq!(to_snake_case("HTTPClient"), "h_t_t_p_client");
+    }
+
+    #[test]
     fn test_generate_empty_context() {
         let context = BoundedContext::new("Test");
         let result = generate(&context).unwrap();
-        assert!(result.contains("Generated from Test"));
+
+        assert!(result.contains("Generated from `test` bounded context"));
+        assert!(result.contains("use serde::{Deserialize, Serialize}"));
+    }
+
+    #[test]
+    fn test_generate_entity() {
+        let mut context = BoundedContext::new("Commerce");
+        let _customer = context.add_entity("Customer");
+
+        let result = generate(&context).unwrap();
+
+        // Should have entity ID type
+        assert!(result.contains("pub struct CustomerId(pub Uuid)"));
+
+        // Should have entity struct
+        assert!(result.contains("pub struct Customer {"));
+        assert!(result.contains("pub id: CustomerId"));
+
+        // Should have ID methods
+        assert!(result.contains("pub fn new() -> Self"));
+        assert!(result.contains("Uuid::new_v4()"));
+    }
+
+    #[test]
+    fn test_generate_entity_with_morphisms() {
+        let mut context = BoundedContext::new("Commerce");
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+
+        // Order -> Customer relationship
+        context.sketch_mut().graph.add_morphism("placed_by", order, customer);
+
+        let result = generate(&context).unwrap();
+
+        // Order should have a placed_by field referencing CustomerId
+        assert!(result.contains("pub struct Order {"));
+        assert!(result.contains("pub placed_by: CustomerId"));
+    }
+
+    #[test]
+    fn test_generate_value_object() {
+        let mut context = BoundedContext::new("Commerce");
+        let _money = context.add_value_object("Money");
+
+        let result = generate(&context).unwrap();
+
+        // Should have value object section
+        assert!(result.contains("// Value Objects"));
+
+        // Should have PartialEq, Eq for structural equality
+        assert!(result.contains("PartialEq"));
+        assert!(result.contains("Eq"));
+
+        // Should have struct
+        assert!(result.contains("pub struct Money {"));
+    }
+
+    #[test]
+    fn test_generate_enum() {
+        let mut context = BoundedContext::new("Commerce");
+        let _status = context.add_enum(
+            "OrderStatus",
+            vec!["Pending".into(), "Confirmed".into(), "Shipped".into()],
+        );
+
+        let result = generate(&context).unwrap();
+
+        // Should have enum section
+        assert!(result.contains("// Enumerations"));
+
+        // Should have enum with variants
+        assert!(result.contains("pub enum OrderStatus {"));
+        assert!(result.contains("Pending,"));
+        assert!(result.contains("Confirmed,"));
+        assert!(result.contains("Shipped,"));
+
+        // Should have is_* methods
+        assert!(result.contains("pub fn is_pending(&self) -> bool"));
+        assert!(result.contains("pub fn is_confirmed(&self) -> bool"));
+        assert!(result.contains("pub fn is_shipped(&self) -> bool"));
+    }
+
+    #[test]
+    fn test_generate_aggregate() {
+        let mut context = BoundedContext::new("Commerce");
+        let order = context.add_entity("Order");
+        let line_item = context.add_entity("LineItem");
+
+        context.define_aggregate_with_members("OrderAggregate", order, &[line_item]);
+
+        let result = generate(&context).unwrap();
+
+        // Should have aggregate section
+        assert!(result.contains("// Aggregate Validation"));
+
+        // Should have ValidationError
+        assert!(result.contains("pub struct ValidationError {"));
+
+        // Should have validate method on Order
+        assert!(result.contains("impl Order {"));
+        assert!(result.contains("pub fn validate(&self) -> Result<(), ValidationError>"));
+    }
+
+    #[test]
+    fn test_generate_commerce_domain() {
+        let mut context = BoundedContext::new("Commerce");
+
+        // Entities
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+        let product = context.add_entity("Product");
+
+        // Value objects
+        let money = context.add_value_object("Money");
+
+        // Relationships
+        context.sketch_mut().graph.add_morphism("placedBy", order, customer);
+        context.sketch_mut().graph.add_morphism("price", product, money);
+
+        // Enum
+        let _status = context.add_enum(
+            "OrderStatus",
+            vec![
+                "Pending".into(),
+                "Confirmed".into(),
+                "Shipped".into(),
+                "Delivered".into(),
+            ],
+        );
+
+        // Aggregate
+        context.define_aggregate("OrderAggregate", order);
+
+        let result = generate(&context).unwrap();
+
+        // Verify all parts are generated
+        assert!(result.contains("pub struct CustomerId"));
+        assert!(result.contains("pub struct OrderId"));
+        assert!(result.contains("pub struct ProductId"));
+        assert!(result.contains("pub struct Money"));
+        assert!(result.contains("pub enum OrderStatus"));
+        assert!(result.contains("pub fn validate(&self)"));
+    }
+
+    #[test]
+    fn test_config_custom_derives() {
+        let context = BoundedContext::new("Test");
+        let config = RustConfig {
+            derives: vec!["Debug".into(), "Clone".into(), "Default".into()],
+            ..Default::default()
+        };
+
+        let result = generate_with_config(&context, &config).unwrap();
+
+        // Custom derives should appear in generated code
+        assert!(result.contains("Serialize"));
+        assert!(result.contains("Deserialize"));
+    }
+
+    #[test]
+    fn test_entity_references_use_id_type() {
+        let mut context = BoundedContext::new("Commerce");
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+
+        // Order references Customer
+        context.sketch_mut().graph.add_morphism("customer", order, customer);
+
+        let result = generate(&context).unwrap();
+
+        // The customer field should be CustomerId, not Customer
+        assert!(result.contains("pub customer: CustomerId"));
+    }
+
+    #[test]
+    fn test_sum_type_with_payloads() {
+        let mut context = BoundedContext::new("Payments");
+
+        // Create variant types
+        let transaction_id = context.sketch_mut().add_object("TransactionId");
+        let error_code = context.sketch_mut().add_object("ErrorCode");
+
+        // Create sum type with payloads
+        let _result = context.add_sum_type(
+            "PaymentResult",
+            vec![
+                ("Success".into(), transaction_id),
+                ("Failed".into(), error_code),
+            ],
+        );
+
+        let result = generate(&context).unwrap();
+
+        // Should have variants with payloads
+        assert!(result.contains("pub enum PaymentResult {"));
+        assert!(result.contains("Success(TransactionId)"));
+        assert!(result.contains("Failed(ErrorCode)"));
     }
 }

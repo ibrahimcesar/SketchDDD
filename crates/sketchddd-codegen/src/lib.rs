@@ -7,10 +7,26 @@
 //! - **Rust**: Structs, enums, and validation
 //! - **TypeScript**: Interfaces, types, and Zod schemas
 //! - **Kotlin**: Data classes and sealed classes
+//!
+//! ## Example
+//!
+//! ```rust
+//! use sketchddd_core::BoundedContext;
+//! use sketchddd_codegen::{generate, Target};
+//!
+//! let mut context = BoundedContext::new("Commerce");
+//! context.add_entity("Customer");
+//! context.add_entity("Order");
+//!
+//! let rust_code = generate(&context, Target::Rust).unwrap();
+//! println!("{}", rust_code);
+//! ```
 
+pub mod kotlin;
 pub mod rust;
 pub mod typescript;
-pub mod kotlin;
+
+pub use rust::RustConfig;
 
 use sketchddd_core::BoundedContext;
 use thiserror::Error;
