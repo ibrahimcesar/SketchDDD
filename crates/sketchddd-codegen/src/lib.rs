@@ -27,6 +27,7 @@ pub mod rust;
 pub mod typescript;
 
 pub use rust::RustConfig;
+pub use typescript::TypeScriptConfig;
 
 use sketchddd_core::BoundedContext;
 use thiserror::Error;

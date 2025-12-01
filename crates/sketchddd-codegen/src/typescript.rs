@@ -1,40 +1,825 @@
-//! TypeScript code generation.
+//! TypeScript code generation for SketchDDD domain models.
+//!
+//! Generates idiomatic TypeScript code from a bounded context:
+//! - Entities as interfaces with branded ID types
+//! - Value objects as readonly interfaces
+//! - Aggregates with Zod schema validation
+//! - Enums and union types for sum types
+//! - Zod schemas for runtime validation
 
-use sketchddd_core::BoundedContext;
 use crate::CodegenError;
+use sketchddd_core::sketch::{ColimitCocone, LimitCone, Morphism, ObjectId};
+use sketchddd_core::BoundedContext;
+use std::collections::{HashMap, HashSet};
 
-/// Generate TypeScript code from a bounded context.
+/// Configuration options for TypeScript code generation.
+#[derive(Debug, Clone)]
+pub struct TypeScriptConfig {
+    /// Whether to generate Zod schemas for runtime validation
+    pub generate_zod_schemas: bool,
+    /// Whether to use branded types for IDs (stricter type safety)
+    pub use_branded_types: bool,
+    /// Whether to generate factory functions for entities
+    pub generate_factories: bool,
+    /// Whether to export types as default or named exports
+    pub use_named_exports: bool,
+    /// Optional namespace to wrap all types
+    pub namespace: Option<String>,
+}
+
+impl Default for TypeScriptConfig {
+    fn default() -> Self {
+        Self {
+            generate_zod_schemas: true,
+            use_branded_types: true,
+            generate_factories: true,
+            use_named_exports: true,
+            namespace: None,
+        }
+    }
+}
+
+/// Generate TypeScript code from a bounded context with default configuration.
 pub fn generate(context: &BoundedContext) -> Result<String, CodegenError> {
-    let mut output = String::new();
+    generate_with_config(context, &TypeScriptConfig::default())
+}
 
-    output.push_str(&format!("// Generated from {} bounded context\n\n", context.name()));
-    output.push_str("import { z } from 'zod';\n\n");
+/// Generate TypeScript code from a bounded context with custom configuration.
+pub fn generate_with_config(
+    context: &BoundedContext,
+    config: &TypeScriptConfig,
+) -> Result<String, CodegenError> {
+    let mut gen = TypeScriptGenerator::new(context, config);
+    gen.generate()
+}
 
-    // Generate entities
-    for entity_id in context.entities() {
-        if let Some(entity) = context.graph().get_object(*entity_id) {
-            output.push_str(&format!(
-                "/** Entity: {} */\nexport interface {} {{\n  readonly id: {}Id;\n}}\n\n",
-                entity.name, entity.name, entity.name
+/// Internal generator state.
+struct TypeScriptGenerator<'a> {
+    context: &'a BoundedContext,
+    config: &'a TypeScriptConfig,
+    output: String,
+    entity_ids: HashSet<ObjectId>,
+    value_object_ids: HashSet<ObjectId>,
+    aggregate_roots: HashSet<ObjectId>,
+    /// Maps object IDs to their names for quick lookup
+    object_names: HashMap<ObjectId, String>,
+    /// Maps object IDs to their outgoing morphisms
+    object_morphisms: HashMap<ObjectId, Vec<&'a Morphism>>,
+}
+
+impl<'a> TypeScriptGenerator<'a> {
+    fn new(context: &'a BoundedContext, config: &'a TypeScriptConfig) -> Self {
+        // Pre-compute lookups
+        let entity_ids: HashSet<_> = context.entities().iter().copied().collect();
+        let value_object_ids: HashSet<_> = context.value_objects().iter().copied().collect();
+        let aggregate_roots: HashSet<_> = context.aggregate_roots().iter().copied().collect();
+
+        let object_names: HashMap<_, _> = context
+            .graph()
+            .objects()
+            .map(|o| (o.id, o.name.clone()))
+            .collect();
+
+        // Group morphisms by source object (excluding identity morphisms)
+        let mut object_morphisms: HashMap<ObjectId, Vec<&Morphism>> = HashMap::new();
+        for morphism in context.graph().morphisms() {
+            if !morphism.is_identity {
+                object_morphisms
+                    .entry(morphism.source)
+                    .or_default()
+                    .push(morphism);
+            }
+        }
+
+        Self {
+            context,
+            config,
+            output: String::new(),
+            entity_ids,
+            value_object_ids,
+            aggregate_roots,
+            object_names,
+            object_morphisms,
+        }
+    }
+
+    fn generate(&mut self) -> Result<String, CodegenError> {
+        self.write_header();
+        self.write_imports();
+
+        // Optionally wrap in namespace
+        let use_namespace = self.config.namespace.is_some();
+        if let Some(ref ns) = self.config.namespace {
+            self.output.push_str(&format!("export namespace {} {{\n\n", ns));
+        }
+
+        self.write_branded_types();
+        self.write_entities();
+        self.write_value_objects();
+        self.write_enums();
+        self.write_aggregates();
+
+        if use_namespace {
+            self.output.push_str("}\n");
+        }
+
+        Ok(std::mem::take(&mut self.output))
+    }
+
+    fn write_header(&mut self) {
+        self.output.push_str(&format!(
+            r#"/**
+ * Generated from `{}` bounded context.
+ *
+ * This file was automatically generated by SketchDDD.
+ * DO NOT EDIT - changes will be overwritten.
+ *
+ * To regenerate: `sketchddd codegen <model>.sddd --target typescript`
+ */
+
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
+"#,
+            self.context.name()
+        ));
+    }
+
+    fn write_imports(&mut self) {
+        if self.config.generate_zod_schemas {
+            self.output.push_str("import { z } from 'zod';\n\n");
+        }
+    }
+
+    fn write_branded_types(&mut self) {
+        if !self.config.use_branded_types {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Branded Types (for type-safe IDs)\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        self.output.push_str(
+            r#"/**
+ * Brand type for nominal typing of IDs.
+ * Prevents accidentally using one entity's ID where another is expected.
+ */
+declare const __brand: unique symbol;
+type Brand<T, B> = T & { readonly [__brand]: B };
+
+"#,
+        );
+    }
+
+    fn write_entities(&mut self) {
+        if self.entity_ids.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Entities\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for entity_id in self.context.entities() {
+            if let Some(entity) = self.context.graph().get_object(*entity_id) {
+                self.write_entity_id_type(&entity.name);
+                self.write_entity_interface(&entity.name, *entity_id);
+                if self.config.generate_zod_schemas {
+                    self.write_entity_schema(&entity.name, *entity_id);
+                }
+                if self.config.generate_factories {
+                    self.write_entity_factory(&entity.name, *entity_id);
+                }
+            }
+        }
+    }
+
+    fn write_entity_id_type(&mut self, name: &str) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        if self.config.use_branded_types {
+            self.output.push_str(&format!(
+                r#"/**
+ * Unique identifier for {name}.
+ * Branded type ensures type safety - cannot use CustomerId where OrderId is expected.
+ */
+{export}type {name}Id = Brand<string, '{name}'>;
+
+"#
             ));
-            output.push_str(&format!(
-                "export type {}Id = string;\n\n",
-                entity.name
+
+            // Helper function to create IDs
+            self.output.push_str(&format!(
+                r#"/**
+ * Create a new {name}Id from a string.
+ */
+{export}function {name}Id(id: string): {name}Id {{
+  return id as {name}Id;
+}}
+
+"#
+            ));
+        } else {
+            self.output.push_str(&format!(
+                r#"/**
+ * Unique identifier for {name}.
+ */
+{export}type {name}Id = string;
+
+"#
+            ));
+        }
+
+        // Zod schema for ID
+        if self.config.generate_zod_schemas {
+            self.output.push_str(&format!(
+                r#"/**
+ * Zod schema for {name}Id validation.
+ */
+{export}const {name}IdSchema = z.string().uuid();
+
+"#
             ));
         }
     }
 
-    // Generate value objects
-    for vo_id in context.value_objects() {
-        if let Some(vo) = context.graph().get_object(*vo_id) {
-            output.push_str(&format!(
-                "/** Value Object: {} */\nexport interface {} {{\n  // TODO: Add fields\n}}\n\n",
-                vo.name, vo.name
+    fn write_entity_interface(&mut self, name: &str, object_id: ObjectId) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+        let is_aggregate_root = self.aggregate_roots.contains(&object_id);
+        let root_note = if is_aggregate_root {
+            " (Aggregate Root)"
+        } else {
+            ""
+        };
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Entity: {name}{root_note}
+ *
+ * An entity has a unique identity that persists through state changes.
+ */
+{export}interface {name} {{
+  /** Unique identifier */
+  readonly id: {name}Id;
+"#
+        ));
+
+        // Add fields from morphisms
+        let field_strs: Vec<String> = self
+            .object_morphisms
+            .get(&object_id)
+            .map(|morphisms| {
+                morphisms
+                    .iter()
+                    .map(|m| self.format_interface_field(m))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("}\n\n");
+    }
+
+    fn write_entity_schema(&mut self, name: &str, object_id: ObjectId) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Zod schema for {name} entity validation.
+ */
+{export}const {name}Schema = z.object({{
+  id: {name}IdSchema,
+"#
+        ));
+
+        // Add field schemas
+        let field_strs: Vec<String> = self
+            .object_morphisms
+            .get(&object_id)
+            .map(|morphisms| {
+                morphisms
+                    .iter()
+                    .map(|m| self.format_schema_field(m))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("});\n\n");
+    }
+
+    fn write_entity_factory(&mut self, name: &str, object_id: ObjectId) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        // Collect parameters
+        let params: Vec<String> = self
+            .object_morphisms
+            .get(&object_id)
+            .map(|morphisms| {
+                morphisms
+                    .iter()
+                    .map(|m| format!("{}: {}", to_camel_case(&m.name), self.ts_type_for_target(m.target)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let params_str = params.join(", ");
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Create a new {name} entity with a generated ID.
+ */
+{export}function create{name}({params_str}): {name} {{
+  return {{
+    id: {name}Id(crypto.randomUUID()),
+"#
+        ));
+
+        // Add field assignments
+        if let Some(morphisms) = self.object_morphisms.get(&object_id) {
+            for morphism in morphisms {
+                let field_name = to_camel_case(&morphism.name);
+                self.output.push_str(&format!("    {field_name},\n"));
+            }
+        }
+
+        self.output.push_str("  };\n}\n\n");
+    }
+
+    fn write_value_objects(&mut self) {
+        if self.value_object_ids.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Value Objects\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for vo_id in self.context.value_objects() {
+            if let Some(vo) = self.context.graph().get_object(*vo_id) {
+                self.write_value_object_interface(&vo.name, *vo_id);
+                if self.config.generate_zod_schemas {
+                    self.write_value_object_schema(&vo.name, *vo_id);
+                }
+            }
+        }
+    }
+
+    fn write_value_object_interface(&mut self, name: &str, object_id: ObjectId) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        // Check if this value object has a limit cone definition with projections
+        let limit_cone = self.context.get_value_object_limit(object_id);
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Value Object: {name}
+ *
+ * A value object is defined by its attributes, not identity.
+ * Two value objects with the same attributes are considered equal.
+ * All properties are readonly to enforce immutability.
+ */
+{export}interface {name} {{
+"#
+        ));
+
+        // Add fields from morphisms or projections
+        let field_strs: Vec<String> = if let Some(morphisms) = self.object_morphisms.get(&object_id) {
+            morphisms.iter().map(|m| self.format_interface_field(m)).collect()
+        } else if let Some(cone) = limit_cone {
+            cone.projections
+                .iter()
+                .filter_map(|proj| self.context.graph().get_morphism(proj.morphism))
+                .map(|m| self.format_interface_field(m))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("}\n\n");
+    }
+
+    fn write_value_object_schema(&mut self, name: &str, object_id: ObjectId) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Zod schema for {name} value object validation.
+ */
+{export}const {name}Schema = z.object({{
+"#
+        ));
+
+        // Add field schemas
+        let field_strs: Vec<String> = self
+            .object_morphisms
+            .get(&object_id)
+            .map(|morphisms| {
+                morphisms
+                    .iter()
+                    .map(|m| self.format_schema_field(m))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for field_str in field_strs {
+            self.output.push_str(&field_str);
+        }
+
+        self.output.push_str("});\n\n");
+    }
+
+    fn write_enums(&mut self) {
+        let colimits = &self.context.sketch().colimits;
+        if colimits.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Enumerations (Sum Types)\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        for colimit in colimits {
+            self.write_enum(colimit);
+        }
+    }
+
+    fn write_enum(&mut self, colimit: &ColimitCocone) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        // Check if this is a simple enum (all variants have same source as apex)
+        // or a sum type with different variant types
+        let is_simple_enum = colimit.injections.iter().all(|i| i.source == colimit.apex);
+
+        if is_simple_enum {
+            // Generate TypeScript enum for simple enums
+            self.output.push_str(&format!(
+                r#"/**
+ * Enumeration: {}
+ *
+ * A simple enumeration of possible values.
+ */
+{}enum {} {{
+"#,
+                colimit.name, export, colimit.name
+            ));
+
+            for injection in &colimit.injections {
+                self.output.push_str(&format!("  {} = '{}',\n", injection.name, injection.name));
+            }
+
+            self.output.push_str("}\n\n");
+
+            // Zod schema for simple enum
+            if self.config.generate_zod_schemas {
+                self.output.push_str(&format!(
+                    r#"/**
+ * Zod schema for {} enum validation.
+ */
+{}const {}Schema = z.nativeEnum({});
+
+"#,
+                    colimit.name, export, colimit.name, colimit.name
+                ));
+            }
+        } else {
+            // Generate discriminated union for sum types with payloads
+            self.output.push_str(&format!(
+                r#"/**
+ * Sum Type: {}
+ *
+ * A discriminated union representing one of several possible variants.
+ */
+"#,
+                colimit.name
+            ));
+
+            // Generate individual variant types
+            for injection in &colimit.injections {
+                let variant_type = self
+                    .object_names
+                    .get(&injection.source)
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                self.output.push_str(&format!(
+                    r#"{}interface {}{} {{
+  readonly kind: '{}';
+  readonly value: {};
+}}
+
+"#,
+                    export,
+                    colimit.name,
+                    injection.name,
+                    injection.name,
+                    variant_type
+                ));
+            }
+
+            // Generate union type
+            let variant_types: Vec<String> = colimit
+                .injections
+                .iter()
+                .map(|i| format!("{}{}", colimit.name, i.name))
+                .collect();
+
+            self.output.push_str(&format!(
+                "{}type {} = {};\n\n",
+                export,
+                colimit.name,
+                variant_types.join(" | ")
+            ));
+
+            // Zod schema for discriminated union
+            if self.config.generate_zod_schemas {
+                self.output.push_str(&format!(
+                    r#"/**
+ * Zod schema for {} discriminated union validation.
+ */
+{}const {}Schema = z.discriminatedUnion('kind', [
+"#,
+                    colimit.name, export, colimit.name
+                ));
+
+                for injection in &colimit.injections {
+                    let variant_type = self
+                        .object_names
+                        .get(&injection.source)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    self.output.push_str(&format!(
+                        "  z.object({{ kind: z.literal('{}'), value: {}Schema }}),\n",
+                        injection.name, variant_type
+                    ));
+                }
+
+                self.output.push_str("]);\n\n");
+            }
+
+            // Generate type guard functions
+            self.write_type_guards(colimit);
+        }
+    }
+
+    fn write_type_guards(&mut self, colimit: &ColimitCocone) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        for injection in &colimit.injections {
+            let fn_name = format!("is{}{}", colimit.name, injection.name);
+            let variant_type = format!("{}{}", colimit.name, injection.name);
+
+            self.output.push_str(&format!(
+                r#"/**
+ * Type guard for {} variant.
+ */
+{export}function {fn_name}(value: {}): value is {variant_type} {{
+  return value.kind === '{}';
+}}
+
+"#,
+                injection.name, colimit.name, injection.name
             ));
         }
     }
 
-    Ok(output)
+    fn write_aggregates(&mut self) {
+        let limits: Vec<_> = self
+            .context
+            .sketch()
+            .limits
+            .iter()
+            .filter(|l| l.is_aggregate)
+            .collect();
+
+        if limits.is_empty() {
+            return;
+        }
+
+        self.output.push_str("// =============================================================\n");
+        self.output.push_str("// Aggregate Validation\n");
+        self.output.push_str("// =============================================================\n\n");
+
+        self.write_validation_error();
+
+        for limit in limits {
+            self.write_aggregate_validation(limit);
+        }
+    }
+
+    fn write_validation_error(&mut self) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Error returned when aggregate validation fails.
+ */
+{export}interface ValidationError {{
+  /** The invariant that was violated. */
+  readonly invariant: string;
+  /** Human-readable error message. */
+  readonly message: string;
+}}
+
+/**
+ * Result type for validation operations.
+ */
+{export}type ValidationResult<T> =
+  | {{ success: true; value: T }}
+  | {{ success: false; errors: ValidationError[] }};
+
+/**
+ * Create a successful validation result.
+ */
+{export}function validationSuccess<T>(value: T): ValidationResult<T> {{
+  return {{ success: true, value }};
+}}
+
+/**
+ * Create a failed validation result.
+ */
+{export}function validationFailure<T>(errors: ValidationError[]): ValidationResult<T> {{
+  return {{ success: false, errors }};
+}}
+
+"#
+        ));
+    }
+
+    fn write_aggregate_validation(&mut self, limit: &LimitCone) {
+        let export = if self.config.use_named_exports { "export " } else { "" };
+
+        let root_id = match limit.root {
+            Some(id) => id,
+            None => return,
+        };
+
+        let root_name = self
+            .object_names
+            .get(&root_id)
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Collect member names
+        let member_names: Vec<String> = limit
+            .projections
+            .iter()
+            .filter_map(|p| self.object_names.get(&p.target).cloned())
+            .collect();
+
+        self.output.push_str(&format!(
+            r#"/**
+ * Aggregate: {}
+ *
+ * Root: {}
+ * Members: {:?}
+ */
+
+/**
+ * Validate {} aggregate invariants.
+ *
+ * Call this function after making changes to ensure the aggregate
+ * is in a valid state.
+ */
+{export}function validate{}(entity: {}): ValidationResult<{}> {{
+  const errors: ValidationError[] = [];
+
+  // TODO: Add invariant validation logic based on model equations
+  //
+  // Example invariant:
+  // if (entity.totalPrice !== entity.items.reduce((sum, item) => sum + item.price, 0)) {{
+  //   errors.push({{
+  //     invariant: 'totalPrice',
+  //     message: 'totalPrice must equal sum of item prices',
+  //   }});
+  // }}
+
+  if (errors.length > 0) {{
+    return validationFailure(errors);
+  }}
+
+  return validationSuccess(entity);
+}}
+
+"#,
+            limit.name,
+            root_name,
+            member_names,
+            root_name,
+            root_name,
+            root_name,
+            root_name
+        ));
+
+        // Generate Zod schema with refinement if configured
+        if self.config.generate_zod_schemas {
+            self.output.push_str(&format!(
+                r#"/**
+ * Zod schema for {} aggregate with refinements.
+ */
+{export}const {}AggregateSchema = {}Schema.refine(
+  (entity) => {{
+    // TODO: Add Zod refinement for aggregate invariants
+    return true;
+  }},
+  {{ message: 'Aggregate invariant violated' }}
+);
+
+"#,
+                root_name, root_name, root_name
+            ));
+        }
+    }
+
+    fn format_interface_field(&self, morphism: &Morphism) -> String {
+        let field_name = to_camel_case(&morphism.name);
+        let field_type = self.ts_type_for_target(morphism.target);
+
+        let mut result = String::new();
+        if let Some(desc) = &morphism.description {
+            result.push_str(&format!("  /** {} */\n", desc));
+        }
+        result.push_str(&format!("  readonly {}: {};\n", field_name, field_type));
+        result
+    }
+
+    fn format_schema_field(&self, morphism: &Morphism) -> String {
+        let field_name = to_camel_case(&morphism.name);
+        let target = morphism.target;
+
+        // Determine the Zod schema for this field
+        let schema = if self.entity_ids.contains(&target) {
+            // Entity reference - use ID schema
+            let target_name = self
+                .object_names
+                .get(&target)
+                .cloned()
+                .unwrap_or_else(|| "Unknown".to_string());
+            format!("{}IdSchema", target_name)
+        } else if self.value_object_ids.contains(&target) {
+            // Value object reference
+            let target_name = self
+                .object_names
+                .get(&target)
+                .cloned()
+                .unwrap_or_else(|| "Unknown".to_string());
+            format!("{}Schema", target_name)
+        } else {
+            // Unknown type - use unknown schema
+            "z.unknown()".to_string()
+        };
+
+        format!("  {}: {},\n", field_name, schema)
+    }
+
+    fn ts_type_for_target(&self, target: ObjectId) -> String {
+        let target_name = self
+            .object_names
+            .get(&target)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Check if target is an entity - use ID reference
+        if self.entity_ids.contains(&target) {
+            format!("{}Id", target_name)
+        } else {
+            target_name
+        }
+    }
+}
+
+/// Convert PascalCase or snake_case to camelCase.
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = false;
+
+    for (i, c) in s.chars().enumerate() {
+        if c == '_' {
+            capitalize_next = true;
+        } else if i == 0 {
+            result.push(c.to_ascii_lowercase());
+        } else if capitalize_next {
+            result.push(c.to_ascii_uppercase());
+            capitalize_next = false;
+        } else if c.is_uppercase() && i > 0 {
+            // Handle PascalCase conversion
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -42,9 +827,268 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_to_camel_case() {
+        assert_eq!(to_camel_case("Customer"), "customer");
+        assert_eq!(to_camel_case("OrderId"), "orderid");
+        assert_eq!(to_camel_case("line_item"), "lineItem");
+        assert_eq!(to_camel_case("placed_by"), "placedBy");
+    }
+
+    #[test]
     fn test_generate_empty_context() {
         let context = BoundedContext::new("Test");
         let result = generate(&context).unwrap();
-        assert!(result.contains("Generated from Test"));
+
+        assert!(result.contains("Generated from `Test` bounded context"));
+        assert!(result.contains("import { z } from 'zod'"));
+    }
+
+    #[test]
+    fn test_generate_entity() {
+        let mut context = BoundedContext::new("Commerce");
+        let _customer = context.add_entity("Customer");
+
+        let result = generate(&context).unwrap();
+
+        // Should have branded ID type
+        assert!(result.contains("type CustomerId = Brand<string, 'Customer'>"));
+
+        // Should have ID constructor function
+        assert!(result.contains("function CustomerId(id: string): CustomerId"));
+
+        // Should have entity interface
+        assert!(result.contains("interface Customer {"));
+        assert!(result.contains("readonly id: CustomerId"));
+
+        // Should have Zod schema
+        assert!(result.contains("const CustomerSchema = z.object({"));
+        assert!(result.contains("const CustomerIdSchema = z.string().uuid()"));
+
+        // Should have factory function
+        assert!(result.contains("function createCustomer("));
+    }
+
+    #[test]
+    fn test_generate_entity_with_morphisms() {
+        let mut context = BoundedContext::new("Commerce");
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+
+        // Order -> Customer relationship
+        context.sketch_mut().graph.add_morphism("placed_by", order, customer);
+
+        let result = generate(&context).unwrap();
+
+        // Order should have a placedBy field referencing CustomerId
+        assert!(result.contains("interface Order {"));
+        assert!(result.contains("readonly placedBy: CustomerId"));
+    }
+
+    #[test]
+    fn test_generate_value_object() {
+        let mut context = BoundedContext::new("Commerce");
+        let _money = context.add_value_object("Money");
+
+        let result = generate(&context).unwrap();
+
+        // Should have value object section
+        assert!(result.contains("// Value Objects"));
+
+        // Should have readonly interface (immutability)
+        assert!(result.contains("interface Money {"));
+
+        // Should have Zod schema
+        assert!(result.contains("const MoneySchema = z.object({"));
+    }
+
+    #[test]
+    fn test_generate_simple_enum() {
+        let mut context = BoundedContext::new("Commerce");
+        let _status = context.add_enum(
+            "OrderStatus",
+            vec!["Pending".into(), "Confirmed".into(), "Shipped".into()],
+        );
+
+        let result = generate(&context).unwrap();
+
+        // Should have enum section
+        assert!(result.contains("// Enumerations"));
+
+        // Should have TypeScript enum
+        assert!(result.contains("enum OrderStatus {"));
+        assert!(result.contains("Pending = 'Pending'"));
+        assert!(result.contains("Confirmed = 'Confirmed'"));
+        assert!(result.contains("Shipped = 'Shipped'"));
+
+        // Should have Zod native enum schema
+        assert!(result.contains("const OrderStatusSchema = z.nativeEnum(OrderStatus)"));
+    }
+
+    #[test]
+    fn test_generate_aggregate() {
+        let mut context = BoundedContext::new("Commerce");
+        let order = context.add_entity("Order");
+        let line_item = context.add_entity("LineItem");
+
+        context.define_aggregate_with_members("OrderAggregate", order, &[line_item]);
+
+        let result = generate(&context).unwrap();
+
+        // Should have aggregate section
+        assert!(result.contains("// Aggregate Validation"));
+
+        // Should have ValidationError interface
+        assert!(result.contains("interface ValidationError {"));
+
+        // Should have ValidationResult type
+        assert!(result.contains("type ValidationResult<T>"));
+
+        // Should have validate function
+        assert!(result.contains("function validateOrder(entity: Order): ValidationResult<Order>"));
+
+        // Should have aggregate schema with refinement
+        assert!(result.contains("const OrderAggregateSchema = OrderSchema.refine("));
+    }
+
+    #[test]
+    fn test_generate_commerce_domain() {
+        let mut context = BoundedContext::new("Commerce");
+
+        // Entities
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+        let product = context.add_entity("Product");
+
+        // Value objects
+        let money = context.add_value_object("Money");
+
+        // Relationships
+        context.sketch_mut().graph.add_morphism("placedBy", order, customer);
+        context.sketch_mut().graph.add_morphism("price", product, money);
+
+        // Enum
+        let _status = context.add_enum(
+            "OrderStatus",
+            vec![
+                "Pending".into(),
+                "Confirmed".into(),
+                "Shipped".into(),
+                "Delivered".into(),
+            ],
+        );
+
+        // Aggregate
+        context.define_aggregate("OrderAggregate", order);
+
+        let result = generate(&context).unwrap();
+
+        // Verify all parts are generated
+        assert!(result.contains("type CustomerId = Brand<string, 'Customer'>"));
+        assert!(result.contains("type OrderId = Brand<string, 'Order'>"));
+        assert!(result.contains("type ProductId = Brand<string, 'Product'>"));
+        assert!(result.contains("interface Money {"));
+        assert!(result.contains("enum OrderStatus {"));
+        assert!(result.contains("function validateOrder("));
+    }
+
+    #[test]
+    fn test_config_no_zod_schemas() {
+        let context = BoundedContext::new("Test");
+        let config = TypeScriptConfig {
+            generate_zod_schemas: false,
+            ..Default::default()
+        };
+
+        let result = generate_with_config(&context, &config).unwrap();
+
+        // Should NOT have zod import
+        assert!(!result.contains("import { z } from 'zod'"));
+    }
+
+    #[test]
+    fn test_config_no_branded_types() {
+        let mut context = BoundedContext::new("Test");
+        let _customer = context.add_entity("Customer");
+
+        let config = TypeScriptConfig {
+            use_branded_types: false,
+            ..Default::default()
+        };
+
+        let result = generate_with_config(&context, &config).unwrap();
+
+        // Should NOT have Brand type
+        assert!(!result.contains("type Brand<T, B>"));
+
+        // Should have simple string type for ID
+        assert!(result.contains("type CustomerId = string"));
+    }
+
+    #[test]
+    fn test_entity_references_use_id_type() {
+        let mut context = BoundedContext::new("Commerce");
+        let customer = context.add_entity("Customer");
+        let order = context.add_entity("Order");
+
+        // Order references Customer
+        context.sketch_mut().graph.add_morphism("customer", order, customer);
+
+        let result = generate(&context).unwrap();
+
+        // The customer field should be CustomerId, not Customer
+        assert!(result.contains("readonly customer: CustomerId"));
+    }
+
+    #[test]
+    fn test_sum_type_with_payloads() {
+        let mut context = BoundedContext::new("Payments");
+
+        // Create variant types
+        let transaction_id = context.sketch_mut().add_object("TransactionId");
+        let error_code = context.sketch_mut().add_object("ErrorCode");
+
+        // Create sum type with payloads
+        let _result = context.add_sum_type(
+            "PaymentResult",
+            vec![
+                ("Success".into(), transaction_id),
+                ("Failed".into(), error_code),
+            ],
+        );
+
+        let result = generate(&context).unwrap();
+
+        // Should have individual variant interfaces
+        assert!(result.contains("interface PaymentResultSuccess {"));
+        assert!(result.contains("readonly kind: 'Success'"));
+        assert!(result.contains("readonly value: TransactionId"));
+
+        assert!(result.contains("interface PaymentResultFailed {"));
+        assert!(result.contains("readonly kind: 'Failed'"));
+        assert!(result.contains("readonly value: ErrorCode"));
+
+        // Should have union type
+        assert!(result.contains("type PaymentResult = PaymentResultSuccess | PaymentResultFailed"));
+
+        // Should have type guard functions
+        assert!(result.contains("function isPaymentResultSuccess(value: PaymentResult): value is PaymentResultSuccess"));
+        assert!(result.contains("function isPaymentResultFailed(value: PaymentResult): value is PaymentResultFailed"));
+    }
+
+    #[test]
+    fn test_namespace_wrapping() {
+        let mut context = BoundedContext::new("Commerce");
+        let _customer = context.add_entity("Customer");
+
+        let config = TypeScriptConfig {
+            namespace: Some("Commerce".into()),
+            ..Default::default()
+        };
+
+        let result = generate_with_config(&context, &config).unwrap();
+
+        // Should be wrapped in namespace
+        assert!(result.contains("export namespace Commerce {"));
+        assert!(result.ends_with("}\n"));
     }
 }
