@@ -7,6 +7,10 @@
 //! - **Rust**: Structs, enums, and validation
 //! - **TypeScript**: Interfaces, types, and Zod schemas
 //! - **Kotlin**: Data classes and sealed classes
+//! - **Python**: Dataclasses and Pydantic models
+//! - **Java**: Records (Java 17+) or POJOs
+//! - **Clojure**: Records with spec validation
+//! - **Haskell**: ADTs with Aeson instances
 //!
 //! ## Example
 //!
@@ -22,10 +26,19 @@
 //! println!("{}", rust_code);
 //! ```
 
+pub mod clojure;
+pub mod haskell;
+pub mod java;
 pub mod kotlin;
+pub mod python;
 pub mod rust;
 pub mod typescript;
 
+pub use clojure::ClojureConfig;
+pub use haskell::HaskellConfig;
+pub use java::JavaConfig;
+pub use kotlin::KotlinConfig;
+pub use python::PythonConfig;
 pub use rust::RustConfig;
 pub use typescript::TypeScriptConfig;
 
@@ -51,6 +64,10 @@ pub enum Target {
     Rust,
     TypeScript,
     Kotlin,
+    Python,
+    Java,
+    Clojure,
+    Haskell,
 }
 
 impl std::str::FromStr for Target {
@@ -61,6 +78,10 @@ impl std::str::FromStr for Target {
             "rust" | "rs" => Ok(Target::Rust),
             "typescript" | "ts" => Ok(Target::TypeScript),
             "kotlin" | "kt" => Ok(Target::Kotlin),
+            "python" | "py" => Ok(Target::Python),
+            "java" => Ok(Target::Java),
+            "clojure" | "clj" => Ok(Target::Clojure),
+            "haskell" | "hs" => Ok(Target::Haskell),
             _ => Err(CodegenError::UnsupportedTarget(s.to_string())),
         }
     }
@@ -72,5 +93,9 @@ pub fn generate(context: &BoundedContext, target: Target) -> Result<String, Code
         Target::Rust => rust::generate(context),
         Target::TypeScript => typescript::generate(context),
         Target::Kotlin => kotlin::generate(context),
+        Target::Python => python::generate(context),
+        Target::Java => java::generate(context),
+        Target::Clojure => clojure::generate(context),
+        Target::Haskell => haskell::generate(context),
     }
 }
