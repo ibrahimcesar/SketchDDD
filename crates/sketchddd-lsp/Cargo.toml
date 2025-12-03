@@ -12,8 +12,8 @@ name = "sketchddd-lsp"
 path = "src/main.rs"
 
 [dependencies]
-sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
-sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
+sketchddd-core = { version = "1.0.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "1.0.0", path = "../sketchddd-parser" }
 
 # LSP dependencies
 tower-lsp = "0.20"

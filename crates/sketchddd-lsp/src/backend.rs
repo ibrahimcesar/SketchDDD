@@ -30,7 +30,8 @@ impl SketchDDDBackend {
     }
 
     /// Get a document by URI
-    pub fn get_document(&self, uri: &Url) -> Option<dashmap::mapref::one::Ref<Url, Document>> {
+    #[allow(dead_code)]
+    pub fn get_document(&self, uri: &Url) -> Option<dashmap::mapref::one::Ref<'_, Url, Document>> {
         self.documents.get(uri)
     }
 

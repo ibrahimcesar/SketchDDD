@@ -13,7 +13,8 @@ pub struct Document {
     pub content: Rope,
     /// Document version
     pub version: i32,
-    /// Parsed result (if successful)
+    /// Parsed result (if successful) - reserved for future semantic analysis
+    #[allow(dead_code)]
     pub parse_result: Option<Vec<sketchddd_parser::ast::ContextDecl>>,
     /// Type definitions found in the document
     pub definitions: Vec<Definition>,
@@ -29,6 +30,7 @@ pub struct Definition {
     pub children: Vec<Definition>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionKind {
     Context,

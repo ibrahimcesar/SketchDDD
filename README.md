@@ -95,25 +95,36 @@ context Commerce {
 
 ---
 
-## Editor Support (Roadmap)
+## Editor Support
 
-We're committed to providing first-class editor support for `.sddd` files:
+First-class editor support for `.sddd` files:
 
 | Editor | Status | Features |
 |--------|--------|----------|
-| **VS Code** | 🔜 Planned | Full LSP support, syntax highlighting, snippets |
-| **Neovim** | 🔜 Planned | LSP via nvim-lspconfig |
-| **Helix** | 🔜 Planned | LSP support |
-| **JetBrains** | 📋 Future | Plugin with full IDE integration |
+| **VS Code** | ✅ Available | Syntax highlighting, snippets, bracket matching |
+| **Sublime Text** | ✅ Available | Syntax highlighting |
+| **Vim/Neovim** | ✅ Available | Syntax highlighting, indentation |
+| **Any LSP Client** | ✅ Available | Full LSP support |
 
-**Language Server Protocol (LSP)** will provide:
-- Syntax highlighting and diagnostics
-- Auto-completion for keywords, objects, and morphisms
+### Language Server Protocol (LSP)
+
+The `sketchddd-lsp` binary provides:
+- Real-time diagnostics and error reporting
+- Auto-completion for keywords, types, and morphisms
 - Go to definition and find references
 - Hover documentation
+- Document symbols and outline
 - Code formatting
 
-Track progress: [Issue #44](https://github.com/ibrahimcesar/SketchDDD/issues/44)
+```bash
+# Install LSP server
+cargo install sketchddd-lsp
+
+# For Neovim (add to your config)
+# lua: require('lspconfig').sketchddd.setup{}
+```
+
+See [editors/](editors/) for installation instructions
 
 ---
 

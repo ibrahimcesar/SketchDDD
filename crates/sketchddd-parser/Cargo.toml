@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
+sketchddd-core = { version = "1.0.0", path = "../sketchddd-core" }
 pest = { workspace = true }
 pest_derive = { workspace = true }
 serde = { workspace = true }

@@ -3,9 +3,11 @@
 //! This module provides semantic token generation for more accurate
 //! syntax highlighting than TextMate grammars can provide.
 
-use tower_lsp::lsp_types::*;
+// Semantic token types and encoding for LSP
+// These are prepared for future semantic highlighting support
 
 /// Token types for semantic highlighting
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
     Namespace = 0,   // context
@@ -24,6 +26,7 @@ pub enum TokenType {
 }
 
 /// Token modifiers
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenModifier {
     Declaration = 0,
@@ -32,6 +35,7 @@ pub enum TokenModifier {
 }
 
 /// A semantic token
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SemanticToken {
     pub line: u32,
@@ -42,6 +46,7 @@ pub struct SemanticToken {
 }
 
 /// Generate semantic tokens for a document
+#[allow(dead_code)]
 pub fn generate_semantic_tokens(text: &str) -> Vec<SemanticToken> {
     let mut tokens = Vec::new();
 
@@ -202,6 +207,7 @@ pub fn generate_semantic_tokens(text: &str) -> Vec<SemanticToken> {
 }
 
 /// Find a word in a line (whole word match)
+#[allow(dead_code)]
 fn find_word(line: &str, word: &str) -> Option<usize> {
     let mut pos = 0;
     while let Some(rel_pos) = line[pos..].find(word) {
@@ -225,6 +231,7 @@ fn find_word(line: &str, word: &str) -> Option<usize> {
 }
 
 /// Encode tokens for LSP response
+#[allow(dead_code)]
 pub fn encode_tokens(tokens: &[SemanticToken]) -> Vec<u32> {
     let mut result = Vec::with_capacity(tokens.len() * 5);
     let mut prev_line = 0u32;

@@ -12,10 +12,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
-sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
-sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
-sketchddd-codegen = { version = "0.1.0", path = "../sketchddd-codegen" }
-sketchddd-viz = { version = "0.1.0", path = "../sketchddd-viz" }
+sketchddd-core = { version = "1.0.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "1.0.0", path = "../sketchddd-parser" }
+sketchddd-codegen = { version = "1.0.0", path = "../sketchddd-codegen" }
+sketchddd-viz = { version = "1.0.0", path = "../sketchddd-viz" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6"

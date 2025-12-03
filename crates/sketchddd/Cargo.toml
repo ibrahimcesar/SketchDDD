@@ -11,7 +11,7 @@ keywords = ["ddd", "domain-driven-design", "category-theory", "modeling", "code-
 categories = ["development-tools", "visualization"]
 
 [dependencies]
-sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
-sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
-sketchddd-codegen = { version = "0.1.0", path = "../sketchddd-codegen" }
-sketchddd-viz = { version = "0.1.0", path = "../sketchddd-viz" }
+sketchddd-core = { version = "1.0.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "1.0.0", path = "../sketchddd-parser" }
+sketchddd-codegen = { version = "1.0.0", path = "../sketchddd-codegen" }
+sketchddd-viz = { version = "1.0.0", path = "../sketchddd-viz" }

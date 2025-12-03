@@ -12,10 +12,10 @@ name = "sketchddd"
 path = "src/main.rs"
 
 [dependencies]
-sketchddd-core = { version = "0.1.0", path = "../sketchddd-core" }
-sketchddd-parser = { version = "0.1.0", path = "../sketchddd-parser" }
-sketchddd-codegen = { version = "0.1.0", path = "../sketchddd-codegen" }
-sketchddd-viz = { version = "0.1.0", path = "../sketchddd-viz" }
+sketchddd-core = { version = "1.0.0", path = "../sketchddd-core" }
+sketchddd-parser = { version = "1.0.0", path = "../sketchddd-parser" }
+sketchddd-codegen = { version = "1.0.0", path = "../sketchddd-codegen" }
+sketchddd-viz = { version = "1.0.0", path = "../sketchddd-viz" }
 clap = { workspace = true }
 colored = { workspace = true }
 thiserror = { workspace = true }
