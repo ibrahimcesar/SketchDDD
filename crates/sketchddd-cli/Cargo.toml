@@ -20,7 +20,7 @@ clap = { workspace = true }
 colored = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
-dirs = "5"
+dirs = "6"
 
 [dev-dependencies]
 assert_cmd = "2"
