@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useDomainStore } from '@/stores';
 import type { NodeKind, DomainNode } from '@/types';
 import {
@@ -6,7 +7,11 @@ import {
   List,
   Layers,
   ArrowRight,
+  Wand2,
+  Plus,
+  Link2,
 } from 'lucide-react';
+import { NewConceptWizard, ConnectConceptsWizard, AggregateWizard } from '../wizards';
 
 interface BlockDefinition {
   kind: NodeKind;
@@ -49,6 +54,11 @@ const blocks: BlockDefinition[] = [
 
 export function BuildingBlocks() {
   const { activeContextId, addNode } = useDomainStore();
+
+  // Wizard states
+  const [showNewConceptWizard, setShowNewConceptWizard] = useState(false);
+  const [showConnectWizard, setShowConnectWizard] = useState(false);
+  const [showAggregateWizard, setShowAggregateWizard] = useState(false);
 
   const handleAddBlock = (kind: NodeKind) => {
     if (!activeContextId) {
@@ -149,6 +159,68 @@ export function BuildingBlocks() {
           <span>Drag between nodes to create morphisms</span>
         </div>
       </div>
+
+      {/* Wizards */}
+      <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+        <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1">
+          <Wand2 className="w-3 h-3" />
+          Guided Wizards
+        </h3>
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowNewConceptWizard(true)}
+            className="w-full flex items-center gap-2 p-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-primary hover:bg-primary/5 transition-all text-left"
+          >
+            <Plus className="w-4 h-4 text-primary" />
+            <div>
+              <div className="text-sm font-medium">New Concept</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Entity or Value Object
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setShowConnectWizard(true)}
+            className="w-full flex items-center gap-2 p-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-primary hover:bg-primary/5 transition-all text-left"
+          >
+            <Link2 className="w-4 h-4 text-primary" />
+            <div>
+              <div className="text-sm font-medium">Connect Concepts</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Define relationships
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setShowAggregateWizard(true)}
+            className="w-full flex items-center gap-2 p-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-primary hover:bg-primary/5 transition-all text-left"
+          >
+            <Layers className="w-4 h-4 text-primary" />
+            <div>
+              <div className="text-sm font-medium">Create Aggregate</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Set aggregate boundaries
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Wizard Modals */}
+      <NewConceptWizard
+        isOpen={showNewConceptWizard}
+        onClose={() => setShowNewConceptWizard(false)}
+      />
+      <ConnectConceptsWizard
+        isOpen={showConnectWizard}
+        onClose={() => setShowConnectWizard(false)}
+      />
+      <AggregateWizard
+        isOpen={showAggregateWizard}
+        onClose={() => setShowAggregateWizard(false)}
+      />
     </div>
   );
 }
