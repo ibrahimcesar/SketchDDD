@@ -10,6 +10,7 @@ import {
   FileCode,
   ShieldCheck,
   LayoutTemplate,
+  Map,
 } from 'lucide-react';
 import { useDomainStore } from '@/stores';
 import { TemplateBrowser } from '../templates';
@@ -17,9 +18,10 @@ import { ValidationStatus } from '../validation';
 
 interface HeaderProps {
   onValidationToggle: () => void;
+  onContextMapToggle: () => void;
 }
 
-export function Header({ onValidationToggle }: HeaderProps) {
+export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) {
   const { canUndo, canRedo, undo, redo, exportModel, togglePalette } = useDomainStore();
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
 
@@ -81,6 +83,15 @@ export function Header({ onValidationToggle }: HeaderProps) {
         >
           <LayoutTemplate className="w-4 h-4" />
           <span className="text-sm">Templates</span>
+        </button>
+
+        <button
+          onClick={onContextMapToggle}
+          className="flex items-center gap-2 px-3 py-1.5 rounded border border-purple-300 dark:border-purple-600 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+          title="View Context Map"
+        >
+          <Map className="w-4 h-4" />
+          <span className="text-sm">Context Map</span>
         </button>
 
         <button
