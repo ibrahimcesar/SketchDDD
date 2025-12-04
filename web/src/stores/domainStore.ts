@@ -422,9 +422,27 @@ export const useDomainStore = create<DomainState & DomainActions>()(
           return JSON.stringify({ contexts: state.contexts, contextMaps: state.contextMaps }, null, 2);
         },
 
-        importModel: (_sddd) => {
-          // TODO: Parse .sddd format using WASM and populate state
-          console.log('Import not yet implemented');
+        importModel: (sddd) => {
+          try {
+            const data = JSON.parse(sddd);
+            set((state) => {
+              saveToHistory(state);
+              if (data.contexts) {
+                state.contexts = data.contexts;
+              }
+              if (data.contextMaps) {
+                state.contextMaps = data.contextMaps;
+              }
+              // Set first context as active if available
+              const contextIds = Object.keys(state.contexts);
+              state.activeContextId = contextIds.length > 0 ? contextIds[0] : null;
+              state.selectedNodeIds = [];
+              state.selectedEdgeIds = [];
+            });
+          } catch (error) {
+            console.error('Failed to import model:', error);
+            throw new Error('Invalid .sddd file format');
+          }
         },
 
         reset: () => {

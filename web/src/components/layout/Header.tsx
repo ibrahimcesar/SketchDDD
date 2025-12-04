@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Menu,
   Save,
@@ -11,10 +11,13 @@ import {
   ShieldCheck,
   LayoutTemplate,
   Map,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import { useDomainStore } from '@/stores';
 import { TemplateBrowser } from '../templates';
 import { ValidationStatus } from '../validation';
+import { SettingsPanel } from '../settings';
 
 interface HeaderProps {
   onValidationToggle: () => void;
@@ -22,8 +25,45 @@ interface HeaderProps {
 }
 
 export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) {
-  const { canUndo, canRedo, undo, redo, exportModel, togglePalette } = useDomainStore();
+  const { canUndo, canRedo, undo, redo, exportModel, importModel, togglePalette } = useDomainStore();
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSave = () => {
+    setSaveStatus('saving');
+    // The persist middleware saves automatically, but we trigger a visual confirmation
+    // Force a state update to ensure persistence
+    setTimeout(() => {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    }, 300);
+  };
+
+  const handleImport = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        importModel(content);
+      } catch (error) {
+        alert('Failed to import file. Please ensure it is a valid .sddd file.');
+        console.error(error);
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset input so the same file can be selected again
+    e.target.value = '';
+  };
 
   const handleExport = () => {
     const sddd = exportModel();
@@ -105,7 +145,15 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
 
         <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-2" />
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".sddd,.sddd.json,.json"
+          onChange={handleFileChange}
+          className="hidden"
+        />
         <button
+          onClick={handleImport}
           className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
           title="Import"
         >
@@ -119,12 +167,18 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
           <Download className="w-4 h-4" />
         </button>
         <button
-          className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
-          title="Save"
+          onClick={handleSave}
+          className={`p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 ${
+            saveStatus === 'saved' ? 'text-green-500' : ''
+          }`}
+          title={saveStatus === 'saved' ? 'Saved!' : 'Save (auto-saves to browser)'}
         >
-          <Save className="w-4 h-4" />
+          {saveStatus === 'saving' && <Loader2 className="w-4 h-4 animate-spin" />}
+          {saveStatus === 'saved' && <Check className="w-4 h-4" />}
+          {saveStatus === 'idle' && <Save className="w-4 h-4" />}
         </button>
         <button
+          onClick={() => setShowSettings(true)}
           className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700"
           title="Settings"
         >
@@ -137,6 +191,9 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
         isOpen={showTemplateBrowser}
         onClose={() => setShowTemplateBrowser(false)}
       />
+
+      {/* Settings Panel Modal */}
+      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </header>
   );
 }

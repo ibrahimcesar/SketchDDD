@@ -6,11 +6,15 @@ import { PropertiesPanel } from '@/components/panels';
 import { ValidationPanel } from '@/components/validation';
 import { ContextMapView } from '@/components/contextmap';
 import { useDomainStore } from '@/stores';
+import { useKeyboardShortcuts } from '@/hooks';
 
 function App() {
   const [showValidation, setShowValidation] = useState(false);
   const [showContextMap, setShowContextMap] = useState(false);
   const { setActiveContext } = useDomainStore();
+
+  // Enable global keyboard shortcuts
+  useKeyboardShortcuts();
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-900">
