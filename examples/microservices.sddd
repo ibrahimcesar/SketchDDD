@@ -1,0 +1,85 @@
+// Microservices Architecture Example
+// Demonstrates context maps between bounded contexts
+
+context Orders {
+  entity Order {
+    id: UUID
+    customerId: UUID
+    status: OrderStatus
+    placedAt: DateTime
+  }
+
+  entity LineItem {
+    id: UUID
+    productId: UUID
+    quantity: Int
+    unitPrice: Decimal
+  }
+
+  enum OrderStatus = Pending | Processing | Shipped | Delivered
+
+  morphisms {
+    items: Order -> LineItem @many
+  }
+
+  aggregate Order {
+    root: Order
+    contains: [LineItem]
+  }
+}
+
+context Shipping {
+  entity Shipment {
+    id: UUID
+    orderId: UUID
+    trackingNumber: String?
+    status: ShipmentStatus
+  }
+
+  value Address {
+    street: String
+    city: String
+    postalCode: String
+    country: String
+  }
+
+  enum ShipmentStatus = Preparing | InTransit | Delivered | Failed
+
+  morphisms {
+    destination: Shipment -> Address @one
+  }
+}
+
+context Inventory {
+  entity Product {
+    id: UUID
+    sku: String
+    name: String
+    quantityOnHand: Int
+  }
+
+  entity StockReservation {
+    id: UUID
+    productId: UUID
+    orderId: UUID
+    quantity: Int
+    expiresAt: DateTime
+  }
+}
+
+// Context Maps define integration between bounded contexts
+map OrdersToShipping: Orders -> Shipping {
+  pattern: CustomerSupplier  // Orders is upstream, Shipping is downstream
+
+  mappings {
+    Order -> Shipment
+  }
+}
+
+map OrdersToInventory: Orders -> Inventory {
+  pattern: AntiCorruptionLayer  // Orders protects itself from Inventory changes
+
+  mappings {
+    LineItem -> StockReservation
+  }
+}

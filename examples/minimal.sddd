@@ -1,0 +1,9 @@
+// Minimal SketchDDD Example
+// The simplest valid domain model
+
+context Minimal {
+  entity Item {
+    id: UUID
+    name: String
+  }
+}

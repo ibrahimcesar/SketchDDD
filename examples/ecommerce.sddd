@@ -1,0 +1,74 @@
+// E-Commerce Domain Model
+// This example demonstrates a typical online store domain
+
+context Commerce {
+  // Core Entities
+  entity Customer {
+    id: UUID
+    email: Email
+    name: String
+    createdAt: DateTime
+  }
+
+  entity Order {
+    id: UUID
+    orderNumber: String
+    placedAt: DateTime
+    status: OrderStatus
+  }
+
+  entity Product {
+    id: UUID
+    sku: String
+    name: String
+    description: String?
+  }
+
+  entity LineItem {
+    id: UUID
+    quantity: Int
+  }
+
+  // Value Objects
+  value Money {
+    amount: Decimal
+    currency: Currency
+  }
+
+  value Address {
+    street: String
+    city: String
+    state: String?
+    postalCode: String
+    country: String
+  }
+
+  // Enums
+  enum OrderStatus = Pending | Confirmed | Shipped | Delivered | Cancelled
+
+  enum Currency = USD | EUR | GBP | JPY | BRL
+
+  // Relationships (Morphisms)
+  morphisms {
+    // Order relationships
+    customer: Order -> Customer @one
+    items: Order -> LineItem @many
+    shippingAddress: Order -> Address @one
+    billingAddress: Order -> Address @one
+    total: Order -> Money @one
+
+    // LineItem relationships
+    product: LineItem -> Product @one
+    unitPrice: LineItem -> Money @one
+
+    // Customer relationships
+    defaultAddress: Customer -> Address?
+  }
+
+  // Aggregate boundary
+  aggregate Order {
+    root: Order
+    contains: [LineItem]
+    invariant: items.quantity > 0
+  }
+}

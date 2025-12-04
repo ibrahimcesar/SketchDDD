@@ -1,0 +1,68 @@
+// Blog Platform Domain Model
+// A simple content management example
+
+context Blog {
+  // Authors write posts
+  entity Author {
+    id: UUID
+    username: String
+    displayName: String
+    bio: String?
+    email: Email
+    joinedAt: DateTime
+  }
+
+  // Posts are the main content
+  entity Post {
+    id: UUID
+    title: String
+    slug: String
+    content: String
+    publishedAt: DateTime?
+    status: PostStatus
+  }
+
+  // Comments on posts
+  entity Comment {
+    id: UUID
+    content: String
+    postedAt: DateTime
+    approved: Bool
+  }
+
+  // Categories for organization
+  entity Category {
+    id: UUID
+    name: String
+    slug: String
+    description: String?
+  }
+
+  // Tags for flexible labeling
+  value Tag {
+    name: String
+    slug: String
+  }
+
+  // Post status workflow
+  enum PostStatus = Draft | Review | Published | Archived
+
+  // Relationships
+  morphisms {
+    // Post relationships
+    author: Post -> Author @one
+    comments: Post -> Comment @many
+    categories: Post -> Category @many
+    tags: Post -> Tag @many
+
+    // Comment relationships
+    commenter: Comment -> Author?  // Anonymous comments allowed
+    post: Comment -> Post @one
+  }
+
+  // Post aggregate includes its comments
+  aggregate Post {
+    root: Post
+    contains: [Comment]
+  }
+}

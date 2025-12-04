@@ -44,14 +44,16 @@ cargo install sketchddd
 sketchddd init my-domain
 
 # Validate your model
-sketchddd check my-domain.sketch
+sketchddd check my-domain.sddd
 
 # Generate code
-sketchddd codegen my-domain.sketch --target rust
+sketchddd codegen my-domain.sddd --target rust
 
 # Start visual builder locally
 sketchddd serve
 ```
+
+> **File Extension:** SketchDDD uses `.sddd` files - short for **S**ketch**DDD**. See [examples/](examples/) for sample models.
 
 ---
 
