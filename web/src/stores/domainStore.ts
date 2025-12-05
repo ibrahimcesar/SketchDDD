@@ -10,6 +10,8 @@ import type {
   Field,
   EnumVariant,
 } from '@/types';
+import { parse as wasmParse, isWasmInitialized } from '@/wasm';
+import type { ParseResult } from '@/wasm';
 
 interface HistoryState {
   past: DomainState[];
@@ -422,9 +424,10 @@ export const useDomainStore = create<DomainState & DomainActions>()(
           return JSON.stringify({ contexts: state.contexts, contextMaps: state.contextMaps }, null, 2);
         },
 
-        importModel: (sddd) => {
+        importModel: (content) => {
           try {
-            const data = JSON.parse(sddd);
+            // Try to parse as JSON first (for .sddd.json files)
+            const data = JSON.parse(content);
             set((state) => {
               saveToHistory(state);
               if (data.contexts) {
@@ -439,9 +442,156 @@ export const useDomainStore = create<DomainState & DomainActions>()(
               state.selectedNodeIds = [];
               state.selectedEdgeIds = [];
             });
-          } catch (error) {
-            console.error('Failed to import model:', error);
-            throw new Error('Invalid .sddd file format');
+          } catch {
+            // Not JSON, try parsing as .sddd text format using WASM
+            if (!isWasmInitialized()) {
+              throw new Error('WASM module not initialized. Please wait for the app to fully load.');
+            }
+
+            const result: ParseResult = wasmParse(content);
+            if (!result.success || !result.data) {
+              throw new Error(result.error || 'Failed to parse .sddd file');
+            }
+
+            // Convert parsed data to our internal format
+            const contexts: Record<string, ContextData> = {};
+            let yOffset = 0;
+
+            for (const ctx of result.data.contexts) {
+              const contextId = generateId();
+              const nodes: Record<string, { node: DomainNode; position: { x: number; y: number } }> = {};
+              const morphisms: Morphism[] = [];
+              const nodeIdMap: Record<string, string> = {};
+
+              let x = 50;
+              let y = 50;
+
+              // Process entities
+              for (const entity of ctx.entities || []) {
+                const nodeId = generateId();
+                nodeIdMap[entity.name] = nodeId;
+                nodes[nodeId] = {
+                  node: {
+                    kind: 'entity',
+                    name: entity.name,
+                    fields: (entity.fields || []).map((f) => ({
+                      id: generateId(),
+                      name: f.name,
+                      type: f.type_name,
+                      optional: f.optional || false,
+                    })),
+                  },
+                  position: { x, y },
+                };
+                x += 250;
+                if (x > 800) {
+                  x = 50;
+                  y += 200;
+                }
+              }
+
+              // Process value objects
+              for (const value of ctx.value_objects || []) {
+                const nodeId = generateId();
+                nodeIdMap[value.name] = nodeId;
+                nodes[nodeId] = {
+                  node: {
+                    kind: 'value',
+                    name: value.name,
+                    fields: (value.fields || []).map((f) => ({
+                      id: generateId(),
+                      name: f.name,
+                      type: f.type_name,
+                      optional: f.optional || false,
+                    })),
+                  },
+                  position: { x, y },
+                };
+                x += 250;
+                if (x > 800) {
+                  x = 50;
+                  y += 200;
+                }
+              }
+
+              // Process enums
+              for (const enumType of ctx.enums || []) {
+                const nodeId = generateId();
+                nodeIdMap[enumType.name] = nodeId;
+                nodes[nodeId] = {
+                  node: {
+                    kind: 'enum',
+                    name: enumType.name,
+                    variants: (enumType.variants || []).map((v) => ({
+                      id: generateId(),
+                      name: v.name,
+                      payload: v.has_payload ? 'unknown' : undefined,
+                    })),
+                  },
+                  position: { x, y },
+                };
+                x += 250;
+                if (x > 800) {
+                  x = 50;
+                  y += 200;
+                }
+              }
+
+              // Process aggregates
+              for (const agg of ctx.aggregates || []) {
+                const nodeId = generateId();
+                nodeIdMap[agg.name] = nodeId;
+                nodes[nodeId] = {
+                  node: {
+                    kind: 'aggregate',
+                    name: agg.name,
+                    rootId: agg.root ? nodeIdMap[agg.root] || '' : '',
+                    memberIds: (agg.contains || []).map((m: string) => nodeIdMap[m] || '').filter(Boolean),
+                    invariants: [],
+                  },
+                  position: { x, y },
+                };
+                x += 250;
+                if (x > 800) {
+                  x = 50;
+                  y += 200;
+                }
+              }
+
+              // Process morphisms
+              for (const morph of ctx.morphisms || []) {
+                const sourceId = nodeIdMap[morph.source];
+                const targetId = nodeIdMap[morph.target];
+                if (sourceId && targetId) {
+                  morphisms.push({
+                    id: generateId(),
+                    sourceId,
+                    targetId,
+                    name: morph.name || 'relates to',
+                    cardinality: 'one',
+                  });
+                }
+              }
+
+              contexts[contextId] = {
+                id: contextId,
+                name: ctx.name,
+                nodes,
+                morphisms,
+              };
+
+              yOffset += y + 200;
+            }
+
+            set((state) => {
+              saveToHistory(state);
+              state.contexts = contexts;
+              state.contextMaps = [];
+              const contextIds = Object.keys(contexts);
+              state.activeContextId = contextIds.length > 0 ? contextIds[0] : null;
+              state.selectedNodeIds = [];
+              state.selectedEdgeIds = [];
+            });
           }
         },
 

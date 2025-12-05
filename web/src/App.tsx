@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header, Sidebar } from '@/components/layout';
 import { Palette } from '@/components/palette';
 import { Canvas } from '@/components/canvas';
@@ -7,11 +7,25 @@ import { ValidationPanel } from '@/components/validation';
 import { ContextMapView } from '@/components/contextmap';
 import { useDomainStore } from '@/stores';
 import { useKeyboardShortcuts } from '@/hooks';
+import { initWasm } from '@/wasm';
 
 function App() {
   const [showValidation, setShowValidation] = useState(false);
   const [showContextMap, setShowContextMap] = useState(false);
+  const [_wasmReady, setWasmReady] = useState(false);
   const { setActiveContext } = useDomainStore();
+
+  // Initialize WASM module
+  useEffect(() => {
+    initWasm()
+      .then(() => {
+        setWasmReady(true);
+        console.log('SketchDDD WASM module initialized');
+      })
+      .catch((err: Error) => {
+        console.error('Failed to initialize WASM:', err);
+      });
+  }, []);
 
   // Enable global keyboard shortcuts
   useKeyboardShortcuts();

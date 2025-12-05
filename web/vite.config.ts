@@ -21,4 +21,5 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['sketchddd-wasm'],
   },
+  assetsInclude: ['**/*.wasm'],
 })
