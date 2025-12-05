@@ -13,11 +13,15 @@ import {
   Map,
   Check,
   Loader2,
+  Code,
+  FileImage,
 } from 'lucide-react';
 import { useDomainStore } from '@/stores';
 import { TemplateBrowser } from '../templates';
 import { ValidationStatus } from '../validation';
 import { SettingsPanel } from '../settings';
+import { CodeGenPanel } from '../codegen';
+import { DiagramExportPanel } from '../export';
 
 interface HeaderProps {
   onValidationToggle: () => void;
@@ -28,6 +32,8 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
   const { canUndo, canRedo, undo, redo, exportModel, importModel, togglePalette } = useDomainStore();
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCodeGen, setShowCodeGen] = useState(false);
+  const [showDiagramExport, setShowDiagramExport] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -143,6 +149,24 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
           <ValidationStatus />
         </button>
 
+        <button
+          onClick={() => setShowCodeGen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded border border-green-300 dark:border-green-600 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20"
+          title="Generate Code"
+        >
+          <Code className="w-4 h-4" />
+          <span className="text-sm">Code</span>
+        </button>
+
+        <button
+          onClick={() => setShowDiagramExport(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded border border-orange-300 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+          title="Export Diagram"
+        >
+          <FileImage className="w-4 h-4" />
+          <span className="text-sm">Diagram</span>
+        </button>
+
         <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-2" />
 
         <input
@@ -194,6 +218,12 @@ export function Header({ onValidationToggle, onContextMapToggle }: HeaderProps) 
 
       {/* Settings Panel Modal */}
       <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Code Generation Panel */}
+      <CodeGenPanel isOpen={showCodeGen} onClose={() => setShowCodeGen(false)} />
+
+      {/* Diagram Export Panel */}
+      <DiagramExportPanel isOpen={showDiagramExport} onClose={() => setShowDiagramExport(false)} />
     </header>
   );
 }
