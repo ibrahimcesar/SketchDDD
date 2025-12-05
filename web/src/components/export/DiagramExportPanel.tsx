@@ -1,15 +1,15 @@
 import { useState, useMemo } from 'react';
-import { X, Download, Copy, Check, FileImage, FileText, BookOpen } from 'lucide-react';
+import { X, Download, Copy, Check, FileImage, FileText, BookOpen, Image, Loader2 } from 'lucide-react';
 import { useDomainStore } from '@/stores';
-import { generateDiagram, downloadDiagram, generateDocs, downloadDocumentation } from '@/utils/export';
-import type { DiagramFormat } from '@/utils/export';
+import { generateDiagram, downloadDiagram, generateDocs, downloadDocumentation, exportAndDownloadCanvas } from '@/utils/export';
+import type { DiagramFormat, ImageFormat } from '@/utils/export';
 
 interface DiagramExportPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type ExportTab = 'diagram' | 'documentation';
+type ExportTab = 'image' | 'diagram' | 'documentation';
 
 const diagramFormats: { id: DiagramFormat; name: string; description: string }[] = [
   { id: 'mermaid-class', name: 'Mermaid Class Diagram', description: 'UML-style class diagram' },
@@ -18,9 +18,13 @@ const diagramFormats: { id: DiagramFormat; name: string; description: string }[]
 
 export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps) {
   const { contexts, activeContextId, contextMaps } = useDomainStore();
-  const [activeTab, setActiveTab] = useState<ExportTab>('diagram');
+  const [activeTab, setActiveTab] = useState<ExportTab>('image');
   const [selectedFormat, setSelectedFormat] = useState<DiagramFormat>('mermaid-class');
   const [copied, setCopied] = useState(false);
+
+  // Image export options
+  const [imageFormat, setImageFormat] = useState<ImageFormat>('png');
+  const [isExporting, setIsExporting] = useState(false);
 
   // Documentation options
   const [includeTOC, setIncludeTOC] = useState(true);
@@ -74,6 +78,21 @@ export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps)
     }
   };
 
+  const handleImageExport = async () => {
+    setIsExporting(true);
+    try {
+      const success = await exportAndDownloadCanvas({ format: imageFormat });
+      if (!success) {
+        alert('Failed to export canvas. Make sure there are nodes on the canvas.');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export canvas.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -105,6 +124,17 @@ export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps)
         {/* Tabs */}
         <div className="flex border-b border-slate-200 dark:border-slate-700">
           <button
+            onClick={() => setActiveTab('image')}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === 'image'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+            }`}
+          >
+            <Image className="w-4 h-4" />
+            Image
+          </button>
+          <button
             onClick={() => setActiveTab('diagram')}
             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
               activeTab === 'diagram'
@@ -113,7 +143,7 @@ export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps)
             }`}
           >
             <FileImage className="w-4 h-4" />
-            Diagrams
+            Mermaid
           </button>
           <button
             onClick={() => setActiveTab('documentation')}
@@ -136,7 +166,72 @@ export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps)
           <div className="flex-1 flex overflow-hidden">
             {/* Sidebar */}
             <div className="w-64 border-r border-slate-200 dark:border-slate-700 p-4 overflow-y-auto">
-              {activeTab === 'diagram' ? (
+              {activeTab === 'image' ? (
+                <>
+                  <label className="block text-sm font-medium mb-3">Image Format</label>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setImageFormat('png')}
+                      className={`w-full text-left p-3 rounded-lg border ${
+                        imageFormat === 'png'
+                          ? 'border-primary bg-primary/10'
+                          : 'border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <div className="font-medium text-sm">PNG</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        Raster image, best for sharing
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setImageFormat('svg')}
+                      className={`w-full text-left p-3 rounded-lg border ${
+                        imageFormat === 'svg'
+                          ? 'border-primary bg-primary/10'
+                          : 'border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <div className="font-medium text-sm">SVG</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        Vector format, scalable
+                      </div>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleImageExport}
+                    disabled={isExporting}
+                    className="w-full mt-6 flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
+                  >
+                    {isExporting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Export {imageFormat.toUpperCase()}
+                      </>
+                    )}
+                  </button>
+
+                  <div className="mt-6 p-3 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                      <Image className="w-4 h-4" />
+                      Canvas Export
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Exports the current canvas view as an image. The exported image includes:
+                    </p>
+                    <ul className="text-xs text-slate-600 dark:text-slate-400 mt-2 space-y-1">
+                      <li>• All visible nodes</li>
+                      <li>• Connections/edges</li>
+                      <li>• Current zoom level</li>
+                    </ul>
+                  </div>
+                </>
+              ) : activeTab === 'diagram' ? (
                 <>
                   <label className="block text-sm font-medium mb-3">Diagram Format</label>
                   <div className="space-y-2">
@@ -229,41 +324,56 @@ export function DiagramExportPanel({ isOpen, onClose }: DiagramExportPanelProps)
 
             {/* Preview */}
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Toolbar */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700">
-                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                  {currentFilename || 'No content'}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopy}
-                    disabled={!currentContent}
-                    className="flex items-center gap-1 px-3 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
-                  >
-                    {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
-                  <button
-                    onClick={handleDownload}
-                    disabled={!currentContent}
-                    className="flex items-center gap-1 px-3 py-1 text-sm rounded bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </button>
+              {activeTab === 'image' ? (
+                <div className="flex-1 flex items-center justify-center bg-slate-100 dark:bg-slate-800 p-8">
+                  <div className="text-center">
+                    <Image className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                    <h3 className="text-lg font-medium mb-2">Canvas Image Export</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
+                      Select a format and click "Export" to download an image of your current canvas.
+                      The image will capture all nodes and connections as they appear on screen.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* Toolbar */}
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                      {currentFilename || 'No content'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleCopy}
+                        disabled={!currentContent}
+                        className="flex items-center gap-1 px-3 py-1 text-sm rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                        {copied ? 'Copied!' : 'Copy'}
+                      </button>
+                      <button
+                        onClick={handleDownload}
+                        disabled={!currentContent}
+                        className="flex items-center gap-1 px-3 py-1 text-sm rounded bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </button>
+                    </div>
+                  </div>
 
-              {/* Content */}
-              <div className="flex-1 overflow-auto bg-slate-900 p-4">
-                {currentContent ? (
-                  <pre className="text-sm text-slate-100 font-mono whitespace-pre-wrap">
-                    <code>{currentContent}</code>
-                  </pre>
-                ) : (
-                  <p className="text-slate-400">No content generated</p>
-                )}
-              </div>
+                  {/* Content */}
+                  <div className="flex-1 overflow-auto bg-slate-900 p-4">
+                    {currentContent ? (
+                      <pre className="text-sm text-slate-100 font-mono whitespace-pre-wrap">
+                        <code>{currentContent}</code>
+                      </pre>
+                    ) : (
+                      <p className="text-slate-400">No content generated</p>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

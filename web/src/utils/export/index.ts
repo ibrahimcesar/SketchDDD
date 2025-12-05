@@ -1,6 +1,8 @@
 export { generateMermaidClassDiagram, generateMermaidERDiagram } from './mermaid';
 export { generateDocumentation } from './documentation';
 export type { DocumentationOptions } from './documentation';
+export { exportCanvasAsImage, downloadImage, exportAndDownloadCanvas } from './image';
+export type { ImageFormat, ImageExportOptions } from './image';
 
 import type { ContextData, ContextMap } from '@/types';
 import { generateMermaidClassDiagram, generateMermaidERDiagram } from './mermaid';
