@@ -27,7 +27,7 @@ categories = ["development-tools", "visualization"]
 # Core dependencies
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Parser
 pest = "2.7"
@@ -39,7 +39,7 @@ strsim = "0.11"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
-colored = "2"
+colored = "3"
 
 # WASM
 wasm-bindgen = "0.2"
